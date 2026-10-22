@@ -1,0 +1,36 @@
+{
+  "name": "freedomcare",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "predev": "node scripts/copy-ocr-assets.mjs",
+    "prebuild": "node scripts/copy-ocr-assets.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test-queue.mjs && node scripts/test-matching.mjs && node scripts/test-ocr.mjs && node scripts/test-udid-parse.mjs && node scripts/test-aadhaar-parse.mjs && node scripts/test-attendance-match.mjs && node scripts/test-aadhaar-fix.mjs",
+    "serve:prod": "next build && next start -H 0.0.0.0"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.109.0",
+    "idb": "^8.0.4",
+    "next": "16.4.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.2",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,1 @@
+-- SUPERSEDED. Do not run. promote_registration is now part of supabase/sql/1_run_now.sql.

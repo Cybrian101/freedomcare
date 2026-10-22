@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/* FreedomCare design tokens. See docs/DESIGN.md */
+@theme {
+  --font-sans: var(--font-sans-next), ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+
+  /* Primary: soft teal */
+  --color-teal-50: #effaf8;
+  --color-teal-100: #d5f2ee;
+  --color-teal-200: #a9e3db;
+  --color-teal-300: #74cdc3;
+  --color-teal-400: #44b2a8;
+  --color-teal-500: #2a968d;
+  --color-teal-600: #1f7a74;
+  --color-teal-700: #1d625e;
+  --color-teal-800: #1b4f4d;
+  --color-teal-900: #1a4241;
+
+  /* Sage */
+  --color-sage-50: #f5f8f4;
+  --color-sage-100: #e8efe5;
+  --color-sage-200: #d2dfcc;
+  --color-sage-300: #b1c8a9;
+  --color-sage-500: #6f9566;
+  --color-sage-700: #46623f;
+
+  /* Calm blue */
+  --color-sky-50: #f1f7fc;
+  --color-sky-100: #deecf8;
+  --color-sky-200: #bcd9f0;
+  --color-sky-500: #3b82b8;
+  --color-sky-700: #285d88;
+
+  /* Accent: Freedom Trust logo red (use sparingly) */
+  --color-accent-50: #fdf0f1;
+  --color-accent-100: #fadde0;
+  --color-accent-500: #e0343f;
+  --color-accent-600: #c92a35;
+  --color-accent-700: #a3202a;
+
+  /* Ink / neutrals (cool slate) */
+  --color-ink: #12262b;
+  --color-ink-soft: #3d555b;
+  --color-ink-muted: #5f767c;
+  --color-line: #dfe8e9;
+  --color-surface: #ffffff;
+  --color-canvas: #f6faf9;
+
+  /* Status */
+  --color-ok-bg: #e3f5ea;
+  --color-ok-fg: #15693a;
+  --color-warn-bg: #fff3d6;
+  --color-warn-fg: #8a5a00;
+  --color-bad-bg: #fde6e7;
+  --color-bad-fg: #a3202a;
+  --color-info-bg: #e2effa;
+  --color-info-fg: #285d88;
+
+  --radius-card: 1.25rem;
+  --shadow-card: 0 1px 2px rgb(18 38 43 / 0.05), 0 4px 16px rgb(18 38 43 / 0.05);
+  --shadow-pop: 0 10px 40px rgb(18 38 43 / 0.18);
+
+  --animate-fade-up: fade-up 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-sheet-up: sheet-up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes sheet-up {
+    from { transform: translateY(24px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+  @keyframes shimmer {
+    0% { opacity: 0.55; }
+    50% { opacity: 1; }
+    100% { opacity: 0.55; }
+  }
+}
+
+html {
+  background: #ffffff;
+  -webkit-tap-highlight-color: transparent;
+  text-size-adjust: 100%;
+}
+
+body {
+  background: #ffffff;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  overflow-x: clip; /* a too-wide child must never make the whole page scroll sideways */
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  min-height: 100dvh;
+  overscroll-behavior-y: none;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-sky-500);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* Safe area helpers for bottom nav on notched phones */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* iOS zooms the page when a text box under 16px is focused. Keep every field at 16px or more (utilities such as
+   text-xl still win because this sits in the base layer). */
+@layer base {
+  input, select, textarea { font-size: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

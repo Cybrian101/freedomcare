@@ -1,0 +1,1 @@
+-- SUPERSEDED. Do not run. Use supabase/sql/1_run_now.sql and supabase/sql/2_run_after_app_deploy.sql instead.
