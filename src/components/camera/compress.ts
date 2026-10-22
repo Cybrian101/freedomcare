@@ -113,7 +113,10 @@ export async function compressImage(src: Blob, kindOrOpts: PhotoKind | CompressO
   }
 }
 
-/** Tiny square-ish JPEG kept on the phone to show a person's picture offline (about 5-10 KB). */
-export async function makeThumbnail(src: Blob, size = 192): Promise<Blob> {
-  return compressImage(src, { maxDim: size, quality: 0.82, minQuality: 0.7, maxBytes: 30 * 1024 });
+/**
+ * Small portrait JPEG (240x320, about 10-15 KB) of a profile photo. It is saved on the person's record so every phone can show
+ * the picture at the distribution desk (to re-confirm who is standing there), also offline. The full-quality photo stays in storage.
+ */
+export async function makeThumbnail(src: Blob, longEdge = 320): Promise<Blob> {
+  return compressImage(src, { maxDim: longEdge, quality: 0.82, minQuality: 0.7, maxBytes: 28 * 1024 });
 }

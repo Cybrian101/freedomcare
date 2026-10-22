@@ -75,8 +75,13 @@ export async function completeDistribution(
 }
 
 /** Attach an already-uploaded profile photo (path profile/<id>/<uuid>.jpg) to this person. Repeat-safe. */
-export async function setProfilePhoto(supabase: SupabaseClient, id: string, path: string): Promise<RosterRow> {
-  return must(await supabase.rpc("set_profile_photo", { p_roster_id: id, p_path: path }).single<RosterRow>())!;
+export async function setProfilePhoto(supabase: SupabaseClient, id: string, path: string, thumb?: string): Promise<RosterRow> {
+  const r = await supabase.rpc("set_profile_photo", { p_roster_id: id, p_path: path, ...(thumb ? { p_thumb: thumb } : {}) }).single<RosterRow>();
+  // an older database function without the thumbnail argument: attach the photo without it rather than fail
+  if (r.error && thumb && /PGRST202|could not find the function/i.test(`${r.error.code ?? ""} ${r.error.message}`)) {
+    return must(await supabase.rpc("set_profile_photo", { p_roster_id: id, p_path: path }).single<RosterRow>())!;
+  }
+  return must(r)!;
 }
 
 export interface RosterCounts {

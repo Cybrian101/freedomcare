@@ -10,6 +10,8 @@ import { Button, Card, PageHeader, Stepper, useToast } from "@/components/ui";
 import { DocumentScanner } from "@/components/scan/DocumentScanner";
 import { ConfidenceField } from "@/components/scan/ConfidenceField";
 import { ProfilePhotoPicker } from "@/components/desk/ProfilePhotoPicker";
+import { blobToBase64 } from "@/lib/photo-data";
+import { makeThumbnail } from "@/components/camera/compress";
 import { createClient } from "@/lib/supabase/client";
 import { formatAadhaar } from "@/lib/aadhaar";
 import { normalizeUdid } from "@/lib/udid";
@@ -183,7 +185,8 @@ export function RegisterFlow() {
       // The id is fixed now, so the photo's storage path is tied to THIS new person.
       const newId = crypto.randomUUID();
       const docs = { ...blobs.current, ...(profilePhoto ? { profile: profilePhoto } : {}) };
-      const item = await submitRegistration({ id: newId, name: payload.name, payload: { ...payload, profile_photo_path: profilePhoto ? `${newId}/profile.jpg` : null }, docs });
+      const thumb = profilePhoto ? await blobToBase64(await makeThumbnail(profilePhoto)).catch(() => null) : null;
+      const item = await submitRegistration({ id: newId, name: payload.name, payload: { ...payload, profile_photo_path: profilePhoto ? `${newId}/profile.jpg` : null, profile_thumb: thumb }, docs });
       setSavedId(item.id);
       await deleteDraft(DRAFT); // now in the sync queue
       toast("Saved on this device", "ok");

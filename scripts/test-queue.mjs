@@ -27,9 +27,9 @@ function mk() {
       net.attends++
       net.lastDob = dob
     },
-    setProfile: async (r, path) => {
+    setProfile: async (r, path, thumb) => {
       if (!net.up) throw new QueueError('network', 'x')
-      net.profiles.push({ r, path })
+      net.profiles.push({ r, path, thumb })
     },
     link: async (r, a, dob, yob) => {
       if (!net.up) throw new QueueError('network', 'x')
@@ -282,7 +282,7 @@ test('link Aadhaar: queued offline, sent once online, permanent conflict is park
 test('profile photo: uploads under the person id, attaches once, survives going offline mid-way', async () => {
   const { db, net, eng } = mk()
   net.up = false
-  await eng.enqueue(newProfileItem({ rosterId: 'r9', regNo: '77', name: 'N', blob: new Blob(['p']), id: 'p1', now: 1_000_000 }))
+  await eng.enqueue(newProfileItem({ rosterId: 'r9', regNo: '77', name: 'N', blob: new Blob(['p']), id: 'p1', thumb: 'QUJD', now: 1_000_000 }))
   await eng.runOnce()
   assert.equal(db.get('p1').status, 'failed')
   assert.ok(db.get('p1').blob, 'photo kept on the phone while unsynced')
@@ -290,6 +290,6 @@ test('profile photo: uploads under the person id, attaches once, survives going 
   await eng.runOnce({ force: true })
   assert.equal(db.get('p1').status, 'synced')
   assert.equal(db.get('p1').blob, null, 'freed once the server has it')
-  assert.deepEqual(net.profiles, [{ r: 'r9', path: profilePath('r9', 'p1') }])
+  assert.deepEqual(net.profiles, [{ r: 'r9', path: profilePath('r9', 'p1'), thumb: 'QUJD' }], 'the thumbnail is sent with the photo so other phones can show it')
   assert.equal(profilePath('r9', 'p1'), 'profile/r9/p1.jpg')
 })

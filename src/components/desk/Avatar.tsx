@@ -9,6 +9,12 @@ const initials = (name: string) =>
 /** A person's picture from this phone's own storage (works offline). Shows initials until a profile photo exists. */
 export function usePersonThumb(personId: string, refreshKey?: unknown): string | null {
   const [url, setUrl] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((t) => t + 1);
+    window.addEventListener("fc:thumbs", bump);
+    return () => window.removeEventListener("fc:thumbs", bump);
+  }, []);
   useEffect(() => {
     let dead = false;
     let made: string | null = null;
@@ -18,7 +24,7 @@ export function usePersonThumb(personId: string, refreshKey?: unknown): string |
       setUrl(made);
     });
     return () => { dead = true; if (made) URL.revokeObjectURL(made); };
-  }, [personId, refreshKey]);
+  }, [personId, refreshKey, tick]);
   return url;
 }
 

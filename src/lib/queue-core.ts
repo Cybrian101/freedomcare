@@ -78,8 +78,8 @@ export interface QueueRemote {
   register(id: string, row: Record<string, unknown>): Promise<void>
   /** Upload a registration document (private bucket). Existing object == success. */
   uploadDoc(path: string, blob: Blob): Promise<void>
-  /** Attach an uploaded profile photo to a camp-list person (server checks the path belongs to that person). */
-  setProfile(rosterId: string, path: string): Promise<void>
+  /** Attach an uploaded profile photo (and its small thumbnail, base64) to a camp-list person. The server checks the path belongs to that person. */
+  setProfile(rosterId: string, path: string, thumb?: string): Promise<void>
 }
 
 export const kindOf = (i: Pick<QueueItem, 'kind'>): QueueKind => i.kind ?? 'handover'
@@ -115,11 +115,14 @@ export function newProfileItem(p: {
   name?: string
   blob: Blob
   id: string
+  /** small base64 JPEG shown on other phones */
+  thumb?: string
   now?: number
 }): QueueItem {
   const now = p.now ?? Date.now()
   return {
     id: p.id, kind: 'profile', rosterId: p.rosterId, regNo: p.regNo, name: p.name, blob: p.blob,
+    payload: p.thumb ? { thumb: p.thumb } : undefined,
     submissionId: p.id, createdAt: now, status: 'queued', attempts: 0, lastError: null, nextAttemptAt: now,
   }
 }
@@ -304,7 +307,7 @@ export class SyncEngine {
           cur = { ...cur, uploaded: true }
           await this.store.put(cur)
         }
-        await this.remote.setProfile(cur.rosterId, path)
+        await this.remote.setProfile(cur.rosterId, path, (cur.payload?.thumb as string | undefined) ?? undefined)
         await this.store.put({ ...cur, blob: null, status: 'synced', lastError: null, syncedAt: this.clock(), resolution: 'created' })
         return true
       }

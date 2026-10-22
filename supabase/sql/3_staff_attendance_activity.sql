@@ -163,8 +163,13 @@ grant execute on function public.my_activity(int) to authenticated;
 -- function below refuses any path that does not start with THAT person's id, so a photo cannot be attached to someone else.
 alter table public.camp_roster add column if not exists profile_photo_path text;
 alter table public.beneficiaries add column if not exists profile_photo_path text;
+-- A small portrait thumbnail (base64 JPEG, about 12 KB) so EVERY phone can show the person's picture at the distribution desk,
+-- online or offline. The full-quality photo stays in the private bucket for admins.
+alter table public.camp_roster add column if not exists profile_thumb text;
+alter table public.beneficiaries add column if not exists profile_thumb text;
 
-create or replace function public.set_profile_photo(p_roster_id uuid, p_path text)
+drop function if exists public.set_profile_photo(uuid, text);
+create or replace function public.set_profile_photo(p_roster_id uuid, p_path text, p_thumb text default null)
 returns public.camp_roster
 language plpgsql security definer set search_path = '' as $$
 declare r public.camp_roster; old_path text;
@@ -173,17 +178,18 @@ begin
   if p_path is null or p_path !~ ('^profile/' || p_roster_id::text || '/[0-9a-f-]{36}\.jpg$') then
     raise exception 'photo path does not belong to this person';
   end if;
+  if p_thumb is not null and (length(p_thumb) > 60000 or p_thumb !~ '^[A-Za-z0-9+/=]+$') then raise exception 'invalid thumbnail'; end if;
   select profile_photo_path into old_path from public.camp_roster where id = p_roster_id for update;
   if not found then raise exception 'beneficiary not found'; end if;
-  update public.camp_roster set profile_photo_path = p_path where id = p_roster_id returning * into r;
+  update public.camp_roster set profile_photo_path = p_path, profile_thumb = coalesce(p_thumb, profile_thumb) where id = p_roster_id returning * into r;
   if old_path is distinct from p_path then
     insert into public.audit_log (actor, action, entity, entity_id, reg_no, detail)
     values ((select auth.uid()), 'profile_photo_added', 'camp_roster', r.id, r.reg_no, jsonb_build_object('replaced', old_path is not null));
   end if;
   return r;
 end $$;
-revoke execute on function public.set_profile_photo(uuid, text) from public, anon;
-grant execute on function public.set_profile_photo(uuid, text) to authenticated;
+revoke execute on function public.set_profile_photo(uuid, text, text) from public, anon;
+grant execute on function public.set_profile_photo(uuid, text, text) to authenticated;
 
 -- Carry a camp-registered person's profile photo over when they are given a Reg. No. and join the camp list.
 create or replace function public.promote_registration(p_beneficiary_id uuid, p_reg_no text, p_appliances jsonb)
@@ -201,8 +207,8 @@ begin
   if exists (select 1 from public.camp_roster where reg_no = trim(p_reg_no)) then
     raise exception 'Reg. No. % is already in use', trim(p_reg_no);
   end if;
-  insert into public.camp_roster (reg_no, name, aadhaar_no, dob, yob, profile_photo_path, appliances, registered_beneficiary_id, review_note)
-  values (trim(p_reg_no), b.name, b.aadhaar_no, b.dob, b.yob, b.profile_photo_path, p_appliances, b.id, 'Registered at camp; Reg. No. assigned by hand')
+  insert into public.camp_roster (reg_no, name, aadhaar_no, dob, yob, profile_photo_path, profile_thumb, appliances, registered_beneficiary_id, review_note)
+  values (trim(p_reg_no), b.name, b.aadhaar_no, b.dob, b.yob, b.profile_photo_path, b.profile_thumb, p_appliances, b.id, 'Registered at camp; Reg. No. assigned by hand')
   returning * into r;
   insert into public.audit_log (actor, action, entity, entity_id, reg_no)
   values ((select auth.uid()), 'reg_no_assigned', 'camp_roster', r.id, r.reg_no);

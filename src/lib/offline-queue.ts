@@ -3,7 +3,8 @@
 import { openDB, type IDBPDatabase } from "idb";
 import { createClient } from "@/lib/supabase/client";
 import { completeDistribution, linkAadhaar, markAttendance, setProfilePhoto } from "@/lib/roster";
-import { putThumb } from "@/lib/local-db";
+import { putThumb, setThumbPath } from "@/lib/local-db";
+import { blobToBase64 } from "@/lib/photo-data";
 import { makeThumbnail } from "@/components/camera/compress";
 import {
   QueueError,
@@ -88,9 +89,10 @@ const remote: QueueRemote = {
       throw classify(e);
     }
   },
-  async setProfile(rosterId, path) {
+  async setProfile(rosterId, path, thumb) {
     try {
-      await setProfilePhoto(createClient(), rosterId, path);
+      await setProfilePhoto(createClient(), rosterId, path, thumb);
+      await setThumbPath(rosterId, path).catch(() => undefined); // the thumbnail on this phone now matches the server's photo
     } catch (e) {
       throw classify(e);
     }
@@ -104,8 +106,8 @@ const remote: QueueRemote = {
   },
   async register(id, row) {
     // A database that has not had the profile-photo column added yet must still accept registrations without a photo.
-    const { profile_photo_path, ...rest } = row as { profile_photo_path?: string | null } & Record<string, unknown>;
-    const { error } = await createClient().from("beneficiaries").insert({ ...(profile_photo_path ? { ...rest, profile_photo_path } : rest), id });
+    const { profile_photo_path, profile_thumb, ...rest } = row as { profile_photo_path?: string | null; profile_thumb?: string | null } & Record<string, unknown>;
+    const { error } = await createClient().from("beneficiaries").insert({ ...rest, ...(profile_photo_path ? { profile_photo_path } : {}), ...(profile_photo_path && profile_thumb ? { profile_thumb } : {}), id });
     if (!error) return;
     // Same client-generated id already inserted by an earlier attempt whose response was lost: success.
     if (error.code === "23505" && /beneficiaries_pkey/.test(error.message)) return;
@@ -173,10 +175,15 @@ export async function submitAttendance(p: { rosterId: string; regNo: string | nu
  * shows next to the person straight away, even offline), then uploaded and attached by the sync engine.
  */
 export async function submitProfilePhoto(p: { rosterId: string; regNo: string | null; name?: string; blob: Blob }): Promise<QueueItem> {
-  const item = stamp(newProfileItem({ ...p, id: crypto.randomUUID() }));
+  // The small thumbnail is made first: it shows next to the person at once on this phone, and travels with the photo so the
+  // other phones can show it too. If it cannot be made, the full photo is still saved and uploaded.
+  let thumb: string | undefined;
+  let thumbBlob: Blob | undefined;
+  try { thumbBlob = await makeThumbnail(p.blob); thumb = await blobToBase64(thumbBlob); } catch { /* preview missing only */ }
+  const item = stamp(newProfileItem({ ...p, id: crypto.randomUUID(), thumb }));
   const eng = getEngine();
   await eng.enqueue(item);
-  try { await putThumb(p.rosterId, await makeThumbnail(p.blob)); } catch { /* the photo is safe in the queue; only the preview is missing */ }
+  if (thumbBlob) { try { await putThumb(p.rosterId, thumbBlob); } catch { /* shows after the next list refresh */ } }
   void eng.runOnce();
   return item;
 }

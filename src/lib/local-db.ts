@@ -7,6 +7,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Appliance, RosterRow } from "@/lib/types";
+import { base64ToBlob } from "@/lib/photo-data";
 
 export interface LocalBeneficiary {
   id: string; // server uuid (stable)
@@ -21,6 +22,8 @@ export interface LocalBeneficiary {
   yob: number | null;
   /** the server has a profile photo for this person (the picture itself is kept in the photos store) */
   has_photo: boolean;
+  /** path of that photo on the server: tells which version of the thumbnail this phone needs */
+  photo_path: string | null;
   appliances: Appliance[];
   review_note: string | null;
   attended_at: string | null;
@@ -46,7 +49,7 @@ interface LocalSchema extends DBSchema {
   meta: { key: string; value: DatasetMeta };
   drafts: { key: string; value: DraftRecord };
   /** small profile pictures (about 5-10 KB each) so a person's photo shows offline; keyed by person id */
-  photos: { key: string; value: { id: string; blob: Blob; savedAt: number } };
+  photos: { key: string; value: { id: string; blob: Blob; savedAt: number; path?: string | null } };
 }
 
 /** Unfinished work that is not yet a queued operation (half-filled form, photo not yet submitted). */
@@ -91,6 +94,7 @@ export function toLocal(r: RosterRow): LocalBeneficiary {
     dob: r.dob ?? null,
     yob: r.yob ?? null,
     has_photo: !!r.profile_photo_path,
+    photo_path: r.profile_photo_path ?? null,
     appliances: r.appliances ?? [],
     review_note: r.review_note,
     attended_at: r.attended_at,
@@ -181,6 +185,37 @@ export async function allLocal(): Promise<LocalBeneficiary[]> {
   return (await db()).getAll("roster");
 }
 
+/**
+ * Download the small profile pictures this phone does not have yet (or has an older version of), so the distribution desk can
+ * re-confirm identity from the picture, online or offline. Only missing ones are fetched, in small batches. Quiet on failure.
+ */
+export async function syncThumbs(sb: SupabaseClient, onlyId?: string): Promise<number> {
+  try {
+    const d = await db();
+    const rows = (await d.getAll("roster")).filter((r) => r.photo_path && (!onlyId || r.id === onlyId));
+    const need: LocalBeneficiary[] = [];
+    for (const r of rows) {
+      const t = await d.get("photos", r.id);
+      if (!t || t.path !== r.photo_path) need.push(r);
+    }
+    let got = 0;
+    for (let i = 0; i < need.length; i += 40) {
+      const batch = need.slice(i, i + 40);
+      const { data, error } = await sb.from("camp_roster").select("id,profile_photo_path,profile_thumb").in("id", batch.map((r) => r.id));
+      if (error) break; // offline, or the database does not have the column yet
+      for (const row of (data ?? []) as { id: string; profile_photo_path: string | null; profile_thumb: string | null }[]) {
+        if (!row.profile_thumb) continue;
+        await d.put("photos", { id: row.id, blob: base64ToBlob(row.profile_thumb), savedAt: Date.now(), path: row.profile_photo_path });
+        got++;
+      }
+    }
+    if (got && typeof window !== "undefined") window.dispatchEvent(new Event("fc:thumbs")); // avatars on screen pick up the new pictures
+    return got;
+  } catch {
+    return 0;
+  }
+}
+
 export async function getByRegNo(reg: string): Promise<LocalBeneficiary[]> {
   return (await db()).getAllFromIndex("roster", "by_reg", reg.trim());
 }
@@ -238,8 +273,14 @@ export async function listDrafts(): Promise<DraftRecord[]> {
   try { return await (await db()).getAll("drafts"); } catch { return []; }
 }
 
-export async function putThumb(personId: string, blob: Blob): Promise<void> {
-  await (await db()).put("photos", { id: personId, blob, savedAt: Date.now() });
+export async function putThumb(personId: string, blob: Blob, path: string | null = null): Promise<void> {
+  await (await db()).put("photos", { id: personId, blob, savedAt: Date.now(), path });
+}
+/** After a photo taken on this phone reaches the server, remember which server photo this thumbnail belongs to. */
+export async function setThumbPath(personId: string, path: string): Promise<void> {
+  const d = await db();
+  const t = await d.get("photos", personId);
+  if (t) await d.put("photos", { ...t, path });
 }
 export async function getThumb(personId: string): Promise<Blob | undefined> {
   try { return (await (await db()).get("photos", personId))?.blob; } catch { return undefined; }

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { Button, Card } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
-import { datasetMeta, downloadDataset, isReady, type DatasetMeta } from "@/lib/local-db";
+import { datasetMeta, downloadDataset, isReady, type DatasetMeta, syncThumbs } from "@/lib/local-db";
 
 // One shared snapshot so every panel/page sees the same state after a download.
 let autoTried = false; // one automatic first download per page load
@@ -24,7 +24,10 @@ export function useDataset() {
     if (snap.busy) return;
     set({ busy: true, error: opts?.silent ? snap.error : null });
     const r = await downloadDataset(createClient());
-    if (r.ok) set({ meta: r.meta, busy: false, error: null });
+    if (r.ok) {
+      set({ meta: r.meta, busy: false, error: null });
+      void syncThumbs(createClient()); // pictures of people photographed on other phones, so the desk can re-confirm identity
+    }
     else if (opts?.silent) set({ busy: false }); // keep the list we have; the "last downloaded" time shows its age
     else set({ busy: false, error: navigator.onLine ? `Download failed: ${r.message}` : "You are offline. Connect once to download the list." });
   }, []);

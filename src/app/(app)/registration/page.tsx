@@ -14,6 +14,8 @@ import { canStartRegistration, lookupAadhaar, type Candidate, type MatchOutcome 
 import { allLocal, type LocalBeneficiary } from "@/lib/local-db";
 import { rankByNameDob, type Ranked } from "@/lib/attendance-match";
 import { submitLink, submitRegistration } from "@/lib/offline-queue";
+import { blobToBase64 } from "@/lib/photo-data";
+import { makeThumbnail } from "@/components/camera/compress";
 import type { OcrResult } from "@/lib/ocr/types";
 
 type Step =
@@ -117,9 +119,10 @@ export default function RegistrationPage() {
       // The id is fixed now, so the profile photo's storage path is tied to THIS new person.
       const newId = crypto.randomUUID();
       const docs = { ...(image.current ? { aadhaar: image.current } : {}), ...(profilePhoto ? { profile: profilePhoto } : {}) };
+      const thumb = profilePhoto ? await blobToBase64(await makeThumbnail(profilePhoto)).catch(() => null) : null;
       const item = await submitRegistration({
         id: newId, name,
-        payload: { ...payload, profile_photo_path: profilePhoto ? `${newId}/profile.jpg` : null },
+        payload: { ...payload, profile_photo_path: profilePhoto ? `${newId}/profile.jpg` : null, profile_thumb: thumb },
         docs: Object.keys(docs).length ? docs : undefined,
       });
       toast("Saved on this device", "ok");

@@ -80,7 +80,7 @@ export type Database = {
         Returns: CampRosterRow
       }
       set_profile_photo: {
-        Args: { p_roster_id: string; p_path: string }
+        Args: { p_roster_id: string; p_path: string; p_thumb?: string }
         Returns: CampRosterRow
       }
       link_aadhaar: {

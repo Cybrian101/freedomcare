@@ -33,7 +33,7 @@ const LEVEL_NOTE: Record<MatchLevel, string> = {
 function stub(c: Candidate): LocalBeneficiary {
   return {
     id: c.id, reg_no: c.reg_no, serial_no: null, batch: null, name: c.name, name_norm: "", aadhaar_last4: null,
-    dob: null, yob: null, has_photo: false, appliances: [], review_note: null, attended_at: null, distributed_at: null, server_updated_at: "",
+    dob: null, yob: null, has_photo: false, photo_path: null, appliances: [], review_note: null, attended_at: null, distributed_at: null, server_updated_at: "",
   };
 }
 

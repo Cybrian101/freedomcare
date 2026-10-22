@@ -4,11 +4,11 @@ import { Badge, Button, Card, Page, SectionTitle, type Tone } from "@/components
 import { createClient } from "@/lib/supabase/client";
 import { getById } from "@/lib/roster";
 import { withTimeout } from "@/lib/net";
-import { asRosterStatus, deleteDraft, getLocal, loadDraft, putLocalFromServer, saveDraft, type LocalBeneficiary } from "@/lib/local-db";
+import { asRosterStatus, deleteDraft, getLocal, loadDraft, putLocalFromServer, saveDraft, syncThumbs, type LocalBeneficiary } from "@/lib/local-db";
 import { kindOf, submitHandover } from "@/lib/offline-queue";
 import { useSync } from "@/components/SyncProvider";
 import { CaptureSheet } from "@/components/camera/CaptureSheet";
-import { Avatar } from "./Avatar";
+import { Avatar, usePersonThumb } from "./Avatar";
 import { ProfilePhotoAction } from "./ProfilePhotoAction";
 import { STATUS_LABEL, SideChip } from "./status";
 import { TokenSlip } from "./TokenSlip";
@@ -28,7 +28,9 @@ export function BeneficiaryProfile({ id }: { id: string }) {
   const [capturing, setCapturing] = useState(false);
   const [draftPhoto, setDraftPhoto] = useState<Blob | null>(null);
   const [photoKey, setPhotoKey] = useState(0);
+  const [zoom, setZoom] = useState(false);
   const { items, retryItem, online } = useSync();
+  const thumbUrl = usePersonThumb(id, photoKey);
 
   const mine = useMemo(() => items.filter((i) => i.rosterId === id).sort((a, b) => b.createdAt - a.createdAt), [items, id]);
   const openHandover = mine.find((i) => kindOf(i) === "handover" && i.status !== "synced");
@@ -63,6 +65,15 @@ export function BeneficiaryProfile({ id }: { id: string }) {
     })();
     return () => { dead = true; };
   }, [id, syncedKey]);
+
+  // The server has a picture for this person but this phone does not have it yet: fetch just that one now (online only).
+  const wantsThumb = !!row?.photo_path && !thumbUrl;
+  useEffect(() => {
+    if (!wantsThumb || !online) return;
+    let dead = false;
+    void syncThumbs(createClient(), id).then((n) => { if (!dead && n) setPhotoKey((k) => k + 1); });
+    return () => { dead = true; };
+  }, [wantsThumb, online, id]);
 
   // A photo that was taken but never submitted (tab closed, phone locked, page refreshed) is restored from the phone.
   useEffect(() => {
@@ -101,7 +112,15 @@ export function BeneficiaryProfile({ id }: { id: string }) {
         {/* who this is */}
         <Card className="space-y-4">
           <div className="flex items-start gap-4">
-            <Avatar id={row.id} name={row.name} size={96} refreshKey={photoKey + (mine.length ? 1 : 0)} />
+            <button
+              type="button"
+              onClick={() => thumbUrl && setZoom(true)}
+              disabled={!thumbUrl}
+              aria-label={thumbUrl ? "Enlarge the profile photo" : "No profile photo on this phone"}
+              className="shrink-0 rounded-2xl focus-visible:outline-offset-2"
+            >
+              <Avatar id={row.id} name={row.name} size={112} refreshKey={photoKey + (mine.length ? 1 : 0)} />
+            </button>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-bold uppercase tracking-wider text-ink-muted">Reg. No. (token)</p>
               <p className="break-all text-5xl font-black leading-none text-ink sm:text-6xl">{row.reg_no ?? "-"}</p>
@@ -194,6 +213,17 @@ export function BeneficiaryProfile({ id }: { id: string }) {
           )}
         </div>
       </div>
+
+      {zoom && thumbUrl && (
+        <div role="dialog" aria-label="Profile photo" onClick={() => setZoom(false)} className="fixed inset-0 z-50 grid place-items-center bg-black/85 p-4">
+          <div className="max-h-full space-y-3 text-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={thumbUrl} alt={`Profile photo of ${row.name}`} className="mx-auto max-h-[75dvh] w-auto rounded-2xl" />
+            <p className="text-lg font-extrabold text-white">{row.name} · Reg. No. {row.reg_no ?? "-"}</p>
+            <p className="text-sm text-white/70">Tap anywhere to close</p>
+          </div>
+        </div>
+      )}
 
       {capturing && (
         <CaptureSheet
