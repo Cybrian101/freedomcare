@@ -1,19 +1,24 @@
 "use client";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Badge, Button, Card, Page, SectionTitle, type Tone } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
 import { getById } from "@/lib/roster";
+import { withTimeout } from "@/lib/net";
 import { asRosterStatus, deleteDraft, getLocal, loadDraft, putLocalFromServer, saveDraft, type LocalBeneficiary } from "@/lib/local-db";
 import { kindOf, submitHandover } from "@/lib/offline-queue";
 import { useSync } from "@/components/SyncProvider";
-import { CameraCapture } from "@/components/camera/CameraCapture";
-import { DeskPill, SideChip } from "./status";
+import { CaptureSheet } from "@/components/camera/CaptureSheet";
+import { Avatar } from "./Avatar";
+import { ProfilePhotoAction } from "./ProfilePhotoAction";
+import { STATUS_LABEL, SideChip } from "./status";
 import { TokenSlip } from "./TokenSlip";
 
+const STATUS_TONE: Record<ReturnType<typeof asRosterStatus>, Tone> = { not_arrived: "neutral", attended: "info", distributed: "ok" };
+
 /**
- * Distribution profile. The record comes from the on-device list first (works offline); when online it is
- * refreshed from the server in the background. "Distributed" is shown only when the SERVER row says so:
- * a queued handover is displayed as "saved on this device", never as complete.
+ * Distribution record. Opens from the list on THIS phone (so it works with no signal) and refreshes from the server in the
+ * background when there is a connection. "Distributed" is shown only when the SERVER says so: a queued handover is shown
+ * as "saved on this phone", never as complete.
  */
 export function BeneficiaryProfile({ id }: { id: string }) {
   const [row, setRow] = useState<LocalBeneficiary | null>(null);
@@ -22,49 +27,47 @@ export function BeneficiaryProfile({ id }: { id: string }) {
   const [showToken, setShowToken] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [draftPhoto, setDraftPhoto] = useState<Blob | null>(null);
+  const [photoKey, setPhotoKey] = useState(0);
   const { items, retryItem, online } = useSync();
 
-  const mine = useMemo(
-    () => items.filter((i) => i.rosterId === id).sort((a, b) => b.createdAt - a.createdAt),
-    [items, id],
-  );
+  const mine = useMemo(() => items.filter((i) => i.rosterId === id).sort((a, b) => b.createdAt - a.createdAt), [items, id]);
   const openHandover = mine.find((i) => kindOf(i) === "handover" && i.status !== "synced");
   const openAttend = mine.find((i) => kindOf(i) === "attendance" && i.status !== "synced");
   const lastHandover = mine.find((i) => kindOf(i) === "handover" && i.status === "synced");
-  // changes whenever the engine confirms something for this beneficiary => re-read the server row
+  // changes whenever the engine confirms something for this person => re-read the server row
   const syncedKey = mine.reduce((m, i) => Math.max(m, i.status === "synced" ? i.syncedAt ?? 0 : 0), 0);
 
   useEffect(() => {
     let dead = false;
     (async () => {
       const local = await getLocal(id).catch(() => undefined);
-      if (!dead && local) { setRow(local); setErr(null); }
+      // Show the copy on this phone at once. The server refresh below can take seconds on a connection that is up but
+      // has no internet, and nobody should wait for it.
+      if (!dead && local) { setRow(local); setErr(null); setLoading(false); }
       if (navigator.onLine) {
         try {
-          const fresh = await getById(createClient(), id);
+          const fresh = await withTimeout(getById(createClient(), id), 6000);
           if (fresh) {
             await putLocalFromServer(fresh);
             const again = await getLocal(id);
             if (!dead && again) setRow(again);
           }
         } catch {
-          /* server unreachable: keep showing the on-device copy */
+          /* server unreachable or slow: keep showing the copy on this phone */
         }
       }
       if (!dead) {
         setLoading(false);
-        if (!local) setErr("This beneficiary is not on this device. Connect and download the list, then search again.");
+        if (!local) setErr("This person is not on this phone. Connect once and download the list, then search again.");
       }
     })();
     return () => { dead = true; };
   }, [id, syncedKey]);
 
-  // A photo that was taken but never submitted (tab closed, phone locked, page refreshed) is restored from the device.
+  // A photo that was taken but never submitted (tab closed, phone locked, page refreshed) is restored from the phone.
   useEffect(() => {
     let dead = false;
-    void loadDraft(`photo:${id}`).then((d) => {
-      if (!dead && d?.blobs?.photo) setDraftPhoto(d.blobs.photo);
-    });
+    void loadDraft(`photo:${id}`).then((d) => { if (!dead && d?.blobs?.photo) setDraftPhoto(d.blobs.photo); });
     return () => { dead = true; };
   }, [id]);
 
@@ -76,105 +79,127 @@ export function BeneficiaryProfile({ id }: { id: string }) {
     [id],
   );
 
-  if (loading) return <p className="p-4 text-slate-500">Loading...</p>;
-  if (!row) return <p className="m-4 rounded-lg bg-red-50 p-3 text-red-800">{err ?? "Not found."}</p>;
+  if (loading) return <Page><p className="p-4 text-ink-muted">Loading...</p></Page>;
+  if (!row) {
+    return (
+      <Page>
+        <a href="/distribution" className="text-sm font-bold text-teal-700">&larr; Back to search</a>
+        <p role="alert" className="rounded-2xl bg-bad-bg px-4 py-3 font-semibold text-bad-fg">{err ?? "Not found."}</p>
+      </Page>
+    );
+  }
 
-  const serverStatus = asRosterStatus(row);
-  const distributed = serverStatus === "distributed";
-  const attended = serverStatus !== "not_arrived" || !!openAttend;
+  const status = asRosterStatus(row);
+  const distributed = status === "distributed";
+  const attended = status !== "not_arrived" || !!openAttend;
 
   return (
-    <div className="mx-auto max-w-xl space-y-4 p-4">
-      <Link href="/distribution" className="text-sm font-semibold text-sky-700">
-        &larr; Back to search
-      </Link>
+    <Page width="wide">
+      <a href="/distribution" className="inline-flex min-h-11 items-center text-sm font-bold text-teal-700">&larr; Back to search</a>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Reg. No. (token)</p>
-            <p className="text-5xl sm:text-6xl break-all font-black leading-none text-slate-900">{row.reg_no ?? "-"}</p>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:items-start">
+        {/* who this is */}
+        <Card className="space-y-4">
+          <div className="flex items-start gap-4">
+            <Avatar id={row.id} name={row.name} size={96} refreshKey={photoKey + (mine.length ? 1 : 0)} />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-wider text-ink-muted">Reg. No. (token)</p>
+              <p className="break-all text-5xl font-black leading-none text-ink sm:text-6xl">{row.reg_no ?? "-"}</p>
+            </div>
           </div>
-          <DeskPill status={serverStatus} />
-        </div>
-        <h1 className="mt-3 text-2xl font-bold text-slate-900">{row.name}</h1>
-        <p className="text-sm text-slate-500">
-          S.No {row.serial_no ?? "-"}
-          {row.attended_at ? ` - attended ${new Date(row.attended_at).toLocaleTimeString("en-IN", { timeStyle: "short" })}` : ""}
-        </p>
+          <div>
+            <h1 className="text-2xl font-extrabold leading-tight text-ink">{row.name}</h1>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Badge tone={STATUS_TONE[status]} dot>{STATUS_LABEL[status]}</Badge>
+              <span className="text-sm text-ink-muted">
+                S.No {row.serial_no ?? "-"}
+                {row.attended_at ? ` · attended ${new Date(row.attended_at).toLocaleTimeString("en-IN", { timeStyle: "short" })}` : ""}
+              </span>
+            </div>
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-ink-muted">Appliances (handed over together)</p>
+            <ul className="divide-y divide-line rounded-2xl border border-line">
+              {row.appliances.length === 0 && <li className="p-3 text-ink-muted">No appliance listed.</li>}
+              {row.appliances.map((a, i) => (
+                <li key={i} className="flex items-center justify-between gap-2 p-3">
+                  <span className="text-base font-semibold text-ink">{a.name}</span>
+                  <SideChip side={a.side} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Card>
 
-        <h2 className="mb-2 mt-4 text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Appliances (handed over together)
-        </h2>
-        <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200">
-          {row.appliances.length === 0 && <li className="p-3 text-slate-500">No appliance listed.</li>}
-          {row.appliances.map((a, i) => (
-            <li key={i} className="flex items-center justify-between gap-2 p-3">
-              <span className="text-base text-slate-900">{a.name}</span>
-              <SideChip side={a.side} />
-            </li>
-          ))}
-        </ul>
+        {/* what to do */}
+        <div className="space-y-4">
+          {row.review_note && (
+            <div role="alert" className="rounded-2xl border-2 border-warn-fg/40 bg-warn-bg p-4 text-warn-fg">
+              <p className="font-extrabold">Please verify</p>
+              <p className="text-sm">{row.review_note}</p>
+            </div>
+          )}
+          {err && <p className="rounded-2xl bg-bad-bg px-4 py-3 text-sm font-semibold text-bad-fg">{err}</p>}
+          {!online && !distributed && (
+            <p className="rounded-2xl bg-warn-bg px-4 py-3 text-sm font-semibold text-warn-fg">
+              No signal: this shows the last status downloaded to this phone. Another phone may have recorded this person since.
+            </p>
+          )}
+
+          <Card className="space-y-5">
+            <SectionTitle>Steps</SectionTitle>
+
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-extrabold text-ink">1. Attendance</p>
+                <p className="text-sm text-ink-muted">
+                  {attended
+                    ? openAttend ? "Saved on this phone, waiting to upload" : "Marked"
+                    : "Not marked yet. Handing over also marks it."}
+                </p>
+              </div>
+              {attended ? <Badge tone="ok" dot>Done</Badge> : <Button href="/attendance" variant="secondary">Open Attendance</Button>}
+            </div>
+
+            <div className="space-y-2 border-t border-line pt-4">
+              <div>
+                <p className="font-extrabold text-ink">2. Profile photo</p>
+                <p className="text-sm text-ink-muted">A picture of the person, so the right person is matched later.</p>
+              </div>
+              <ProfilePhotoAction person={row} hasPhoto={row.has_photo} onSaved={() => setPhotoKey((k) => k + 1)} />
+            </div>
+
+            <div className="space-y-3 border-t border-line pt-4">
+              <div>
+                <p className="font-extrabold text-ink">3. Handover photo</p>
+                <p className="text-sm text-ink-muted">Photograph the person receiving the aid. This completes the distribution.</p>
+              </div>
+              <SyncBanner
+                distributedAt={row.distributed_at}
+                open={openHandover}
+                dup={lastHandover?.resolution === "duplicate"}
+                onRetry={() => openHandover && retryItem(openHandover.id)}
+              />
+              {!distributed && !openHandover && (
+                <Button size="lg" full onClick={() => setCapturing(true)}>
+                  {draftPhoto ? "Resume unsent handover photo" : "Photograph handover"}
+                </Button>
+              )}
+            </div>
+          </Card>
+
+          <Button variant="ghost" full onClick={() => setShowToken((s) => !s)}>{showToken ? "Hide token" : "Show token"}</Button>
+          {showToken && (
+            <TokenSlip row={{ ...row, aadhaar_no: null, attended_by: null, distributed_by: null, photo_path: null, submission_id: null, created_at: "", updated_at: row.server_updated_at }} />
+          )}
+        </div>
       </div>
 
-      {row.review_note && (
-        <div role="alert" className="rounded-xl border-2 border-amber-400 bg-amber-50 p-3 text-amber-950">
-          <p className="text-sm font-bold">Please verify</p>
-          <p className="text-sm">{row.review_note}</p>
-        </div>
-      )}
-
-      {err && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{err}</p>}
-      {!online && !distributed && (
-        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
-          Offline: this shows the last downloaded status. Another device may have recorded this beneficiary since.
-        </p>
-      )}
-
-      {openAttend && !openHandover && (
-        <div className="rounded-xl border-2 border-sky-300 bg-sky-50 p-3 text-sky-950">
-          <p className="font-bold">Attendance saved on this device - awaiting sync</p>
-          <button onClick={() => retryItem(openAttend.id)} className="mt-2 rounded-lg bg-sky-700 px-3 py-1.5 text-sm font-semibold text-white">
-            Retry now
-          </button>
-        </div>
-      )}
-
-      <SyncBanner
-        distributedAt={row.distributed_at}
-        open={openHandover}
-        dup={lastHandover?.resolution === "duplicate"}
-        onRetry={() => openHandover && retryItem(openHandover.id)}
-      />
-
-      {!attended && !distributed && (
-        <div className="rounded-xl border border-slate-300 bg-slate-50 p-3 text-sm text-slate-700">
-          Attendance is not marked yet. Handing over also marks them as attended; you can still mark it on the{" "}
-          <Link href="/attendance" className="font-semibold underline">Attendance</Link> page.
-        </div>
-      )}
-
-      <>
-        {!distributed && !openHandover && (
-          <button
-            onClick={() => setCapturing(true)}
-            className="h-16 w-full rounded-2xl bg-emerald-600 text-lg font-bold text-white active:bg-emerald-700"
-          >
-            {draftPhoto ? "Resume unsent handover photo" : "Photograph handover"}
-          </button>
-        )}
-        <button
-          onClick={() => setShowToken((s) => !s)}
-          className="h-12 w-full rounded-xl border border-slate-300 bg-white font-semibold text-slate-800 active:bg-slate-50"
-        >
-          {showToken ? "Hide token" : "Show token"}
-        </button>
-        {showToken && <TokenSlip row={{ ...row, aadhaar_no: null, attended_by: null, distributed_by: null, photo_path: null, submission_id: null, created_at: "", updated_at: row.server_updated_at }} />}
-      </>
       {capturing && (
-        <CameraCapture
+        <CaptureSheet
           key={row.id}
-          title={`#${row.reg_no ?? ""} ${row.name}`}
+          kind="handover"
+          subject={{ name: row.name, regNo: row.reg_no }}
           initialPhoto={draftPhoto}
           onPhotoReady={keepPhoto}
           onCancel={() => setCapturing(false)}
@@ -187,15 +212,12 @@ export function BeneficiaryProfile({ id }: { id: string }) {
           }}
         />
       )}
-    </div>
+    </Page>
   );
 }
 
 function SyncBanner({
-  distributedAt,
-  open,
-  dup,
-  onRetry,
+  distributedAt, open, dup, onRetry,
 }: {
   distributedAt: string | null;
   open?: { status: string; lastError: string | null; attempts: number };
@@ -205,31 +227,26 @@ function SyncBanner({
   if (open) {
     if (open.status === "rejected")
       return (
-        <div role="alert" className="rounded-xl border-2 border-red-400 bg-red-50 p-3 text-red-900">
-          <p className="font-bold">Could not save handover</p>
+        <div role="alert" className="space-y-1 rounded-2xl bg-bad-bg p-4 text-bad-fg">
+          <p className="font-extrabold">Could not save the handover</p>
           <p className="text-sm">{open.lastError}</p>
-          <Link href="/queue" className="text-sm font-semibold underline">
-            Open sync queue
-          </Link>
+          <a href="/queue" className="text-sm font-bold underline">Open the sync log</a>
         </div>
       );
     return (
-      <div className="rounded-xl border-2 border-sky-300 bg-sky-50 p-3 text-sky-950">
-        <p className="font-bold">Saved on this device - awaiting sync</p>
+      <div className="space-y-2 rounded-2xl bg-info-bg p-4 text-info-fg">
+        <p className="font-extrabold">Saved on this phone - waiting to upload</p>
         <p className="text-sm">
-          The photo is safe here and uploads automatically
-          {open.lastError ? ` (${open.lastError})` : ""}. It is NOT recorded as distributed until the server confirms.
+          The photo is safe here and uploads by itself{open.lastError ? ` (${open.lastError})` : ""}. It is NOT counted as distributed until the server confirms.
         </p>
-        <button onClick={onRetry} className="mt-2 rounded-lg bg-sky-700 px-3 py-1.5 text-sm font-semibold text-white">
-          Retry now
-        </button>
+        <Button variant="secondary" onClick={onRetry}>Retry now</Button>
       </div>
     );
   }
   if (distributedAt)
     return (
-      <div className="rounded-xl border-2 border-emerald-400 bg-emerald-50 p-3 text-emerald-950">
-        <p className="font-bold">Confirmed by FreedomCare</p>
+      <div className="rounded-2xl bg-ok-bg p-4 text-ok-fg">
+        <p className="font-extrabold">Confirmed by FreedomCare</p>
         <p className="text-sm">
           Distributed {new Date(distributedAt).toLocaleString("en-IN")}
           {dup ? " - already recorded earlier (another device); your photo was not needed." : ""}

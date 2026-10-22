@@ -5,6 +5,7 @@ import { listQueue } from "@/lib/offline-queue";
 import { decide, type Candidate, type MatchOutcome, type ServerLookup } from "@/lib/matching-core";
 import { isValidAadhaar } from "@/lib/ocr/verhoeff";
 import { checkAadhaar } from "@/lib/aadhaar-check";
+import { withTimeout } from "@/lib/net";
 
 export * from "@/lib/matching-core";
 
@@ -27,7 +28,7 @@ export async function lookupAadhaar(sb: SupabaseClient, digits: string): Promise
     server = { status: "unavailable", reason: "offline" };
   } else {
     try {
-      const r = await checkAadhaar(sb, digits);
+      const r = await withTimeout(checkAadhaar(sb, digits), 6000); // a dead connection must not freeze the screen
       server = {
         status: "ok",
         rosterRow: r.roster ? { id: r.roster.id, reg_no: r.roster.reg_no, name: r.roster.name } : null,

@@ -9,8 +9,9 @@
     "lint": "eslint",
     "predev": "node scripts/copy-ocr-assets.mjs",
     "prebuild": "node scripts/copy-ocr-assets.mjs",
+    "postbuild": "node scripts/make-sw.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/test-queue.mjs && node scripts/test-matching.mjs && node scripts/test-ocr.mjs && node scripts/test-udid-parse.mjs && node scripts/test-aadhaar-parse.mjs && node scripts/test-attendance-match.mjs && node scripts/test-aadhaar-fix.mjs",
+    "test": "node scripts/test-queue.mjs && node scripts/test-matching.mjs && node scripts/test-ocr.mjs && node scripts/test-udid-parse.mjs && node scripts/test-aadhaar-parse.mjs && node scripts/test-attendance-match.mjs && node scripts/test-aadhaar-fix.mjs && node scripts/test-aadhaar-qr.mjs",
     "serve:prod": "next build && next start -H 0.0.0.0"
   },
   "dependencies": {
@@ -20,7 +21,8 @@
     "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "tesseract.js": "^7.0.0"
+    "tesseract.js": "^7.0.0",
+    "zxing-wasm": "^3.1.6"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
@@ -30,6 +32,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
+    "qrcode": "^1.5.4",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

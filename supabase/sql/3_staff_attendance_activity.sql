@@ -156,6 +156,61 @@ $$;
 revoke execute on function public.my_activity(int) from public, anon;
 grant execute on function public.my_activity(int) to authenticated;
 
--- Check: should list the five functions
+-- ============================================================================
+-- 4. Profile photo, mapped to the person it was taken for (registration AND distribution/attendance)
+-- ============================================================================
+-- A path inside the private 'documents' bucket. For the camp list it is always profile/<roster id>/<uuid>.jpg, and the
+-- function below refuses any path that does not start with THAT person's id, so a photo cannot be attached to someone else.
+alter table public.camp_roster add column if not exists profile_photo_path text;
+alter table public.beneficiaries add column if not exists profile_photo_path text;
+
+create or replace function public.set_profile_photo(p_roster_id uuid, p_path text)
+returns public.camp_roster
+language plpgsql security definer set search_path = '' as $$
+declare r public.camp_roster; old_path text;
+begin
+  if (select auth.uid()) is null then raise exception 'not authenticated'; end if;
+  if p_path is null or p_path !~ ('^profile/' || p_roster_id::text || '/[0-9a-f-]{36}\.jpg$') then
+    raise exception 'photo path does not belong to this person';
+  end if;
+  select profile_photo_path into old_path from public.camp_roster where id = p_roster_id for update;
+  if not found then raise exception 'beneficiary not found'; end if;
+  update public.camp_roster set profile_photo_path = p_path where id = p_roster_id returning * into r;
+  if old_path is distinct from p_path then
+    insert into public.audit_log (actor, action, entity, entity_id, reg_no, detail)
+    values ((select auth.uid()), 'profile_photo_added', 'camp_roster', r.id, r.reg_no, jsonb_build_object('replaced', old_path is not null));
+  end if;
+  return r;
+end $$;
+revoke execute on function public.set_profile_photo(uuid, text) from public, anon;
+grant execute on function public.set_profile_photo(uuid, text) to authenticated;
+
+-- Carry a camp-registered person's profile photo over when they are given a Reg. No. and join the camp list.
+create or replace function public.promote_registration(p_beneficiary_id uuid, p_reg_no text, p_appliances jsonb)
+returns public.camp_roster
+language plpgsql security definer set search_path = '' as $$
+declare b public.beneficiaries; r public.camp_roster;
+begin
+  if (select auth.uid()) is null then raise exception 'not authenticated'; end if;
+  if coalesce(trim(p_reg_no), '') = '' then raise exception 'Reg. No. required'; end if;
+  if jsonb_typeof(p_appliances) is distinct from 'array' then raise exception 'appliances must be a list'; end if;
+  select * into b from public.beneficiaries where id = p_beneficiary_id;
+  if not found then raise exception 'beneficiary not found'; end if;
+  select * into r from public.camp_roster where registered_beneficiary_id = p_beneficiary_id;
+  if found then return r; end if;                      -- repeat-safe
+  if exists (select 1 from public.camp_roster where reg_no = trim(p_reg_no)) then
+    raise exception 'Reg. No. % is already in use', trim(p_reg_no);
+  end if;
+  insert into public.camp_roster (reg_no, name, aadhaar_no, dob, yob, profile_photo_path, appliances, registered_beneficiary_id, review_note)
+  values (trim(p_reg_no), b.name, b.aadhaar_no, b.dob, b.yob, b.profile_photo_path, p_appliances, b.id, 'Registered at camp; Reg. No. assigned by hand')
+  returning * into r;
+  insert into public.audit_log (actor, action, entity, entity_id, reg_no)
+  values ((select auth.uid()), 'reg_no_assigned', 'camp_roster', r.id, r.reg_no);
+  return r;
+end $$;
+revoke execute on function public.promote_registration(uuid, text, jsonb) from public, anon;
+grant execute on function public.promote_registration(uuid, text, jsonb) to authenticated;
+
+-- Check: should list the six functions
 select proname from pg_proc where pronamespace = 'public'::regnamespace
-  and proname in ('link_aadhaar', 'mark_attendance', 'admin_activity', 'admin_list_staff', 'my_activity') order by 1;
+  and proname in ('link_aadhaar', 'mark_attendance', 'admin_activity', 'admin_list_staff', 'my_activity', 'set_profile_photo') order by 1;

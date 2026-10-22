@@ -49,7 +49,7 @@ export default function AssignPage() {
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-5 space-y-4">
+    <div className="mx-auto w-full max-w-xl space-y-4">
       <PageHeader title="Assign Reg. No." subtitle="People registered at the camp who do not have a Reg. No. yet" />
       {err && <p role="alert" className="rounded-2xl bg-bad-bg px-4 py-3 text-sm font-semibold text-bad-fg">{err}</p>}
       {err && <Button variant="secondary" full onClick={load}>Try again</Button>}

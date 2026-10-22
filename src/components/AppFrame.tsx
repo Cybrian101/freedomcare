@@ -7,7 +7,6 @@ import { AppShell } from "./AppShell";
 import { SyncProvider, SyncPill, PendingBanner, WhoAmI } from "./SyncProvider";
 import { RosterAutoRefresh } from "./DatasetPanel";
 import { SignOutForm } from "./SignOutForm";
-import { PwaRegister } from "./PwaRegister";
 import { SessionLease } from "./SessionLease";
 
 /** Reads the signed-in user. This is request-time data, so it lives under its own Suspense boundary and the
@@ -23,7 +22,6 @@ async function Account() {
 export function AppFrame({ children }: { children: React.ReactNode }) {
   return (
     <SyncProvider>
-      <PwaRegister />
       <SessionLease />
       <RosterAutoRefresh />
       <AppShell

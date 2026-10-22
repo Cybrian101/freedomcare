@@ -20,7 +20,7 @@ export default function AdminPage() {
   if (!loaded) return <p className="p-4 text-ink-muted">Checking access...</p>;
   if (role !== "admin") {
     return (
-      <div className="mx-auto max-w-xl px-4 py-5">
+      <div className="mx-auto w-full max-w-xl">
         <Card className="space-y-2">
           <h1 className="text-lg font-extrabold text-ink">Admins only</h1>
           <p className="text-ink-muted">This page lists every beneficiary and photo. Ask an administrator for access.</p>
@@ -37,7 +37,7 @@ function AdminTabs() {
   const [section, setSection] = useState<Section>("people");
   return (
     <>
-      <div className="mx-auto max-w-3xl px-4 pt-5">
+      <div className="mx-auto w-full max-w-3xl pb-4">
         <SegmentedControl<Section>
           label="Admin sections"
           value={section}
@@ -47,7 +47,7 @@ function AdminTabs() {
       </div>
       {section === "people" && <AdminList />}
       {section !== "people" && (
-        <div className="mx-auto max-w-3xl px-4 py-5">
+        <div className="mx-auto w-full max-w-3xl">
           <PageHeader
             title={section === "staff" ? "Staff logins" : "Activity log"}
             subtitle={section === "staff" ? "Add staff, switch a login off, reset a password" : "Who saved attendance, handover photos and details, and for whom"}
@@ -118,7 +118,7 @@ function AdminList() {
   const rows = tab === "camp" ? campRows : regRows;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-5 space-y-4">
+    <div className="mx-auto w-full max-w-3xl space-y-4">
       <PageHeader title="All beneficiaries" subtitle="Admin view: details and photos. Photos load only when you tap them." />
       <div className="grid grid-cols-2 gap-2">
         <Button variant={tab === "camp" ? "primary" : "secondary"} onClick={() => { setTab("camp"); setShown(PAGE); }}>
@@ -165,6 +165,7 @@ function AdminList() {
             {r.distributed_at && (
               <p className="text-sm text-ink-muted">Handed over {new Date(r.distributed_at).toLocaleString("en-IN")}</p>
             )}
+            {r.profile_photo_path && <Photo bucket="documents" path={r.profile_photo_path} label="profile photo" urls={urls} show={show} />}
             {r.photo_path && <Photo bucket="handover-photos" path={r.photo_path} label="handover photo" urls={urls} show={show} />}
           </Card>
         ))}
@@ -187,6 +188,7 @@ function AdminList() {
             {b.address && <p className="text-sm text-ink-muted">{b.address}</p>}
             {b.aadhaar_no && !revealed.has(b.id) && <button className="text-sm font-semibold underline" onClick={() => reveal(b.id)}>Show full Aadhaar</button>}
             <div className="grid gap-2">
+              {b.profile_photo_path && <Photo bucket="documents" path={b.profile_photo_path} label="profile photo" urls={urls} show={show} />}
               <Photo bucket="documents" path={`${b.id}/aadhaar.jpg`} label="Aadhaar scan" urls={urls} show={show} />
               <Photo bucket="documents" path={`${b.id}/udid.jpg`} label="UDID / enrolment scan" urls={urls} show={show} />
             </div>

@@ -54,8 +54,28 @@ export function DatasetPanel({ compact = false }: { compact?: boolean }) {
         ? `Incomplete list (${meta!.count} of ${meta!.serverCount ?? "?"}) - not safe to rely on offline`
         : "No beneficiary list on this device yet";
 
+  if (compact) {
+    // Slim one-line bar so the search box stays near the top of a small screen.
+    const short = !loaded ? "Checking this phone..." : ready ? `${meta!.count} people on this phone, ready for offline` : partial ? `Incomplete list (${meta!.count} of ${meta!.serverCount ?? "?"})` : "No list on this phone yet";
+    return (
+      <div className="space-y-1">
+        <div className={`flex items-center gap-2 rounded-2xl py-1.5 pl-3 pr-1.5 ${tone}`} role="status" title={meta ? `Last downloaded ${fmt(meta.downloadedAt)}` : undefined}>
+          <span className="min-w-0 flex-1 text-sm font-bold leading-snug">{short}</span>
+          <button
+            onClick={() => void refresh()}
+            disabled={busy}
+            className="min-h-11 shrink-0 rounded-xl bg-white/85 px-3 text-sm font-bold text-teal-800 active:bg-white disabled:opacity-60"
+          >
+            {busy ? "Updating..." : meta ? "Refresh" : "Download"}
+          </button>
+        </div>
+        {error && <p role="alert" className="text-sm font-semibold text-bad-fg">{error}</p>}
+      </div>
+    );
+  }
+
   return (
-    <Card className={compact ? "space-y-2" : "space-y-3"}>
+    <Card className="space-y-3">
       <div className={`rounded-2xl px-4 py-3 text-sm font-bold ${tone}`} role="status">
         {headline}
       </div>
@@ -65,7 +85,7 @@ export function DatasetPanel({ compact = false }: { compact?: boolean }) {
           {meta.verifiedAt ? " - count matched the server" : ""}.
         </p>
       )}
-      {!ready && !compact && (
+      {!ready && (
         <p className="text-xs text-ink-muted">
           Search works offline only for beneficiaries already downloaded to this device. A person missing from this
           list cannot be found without a connection.

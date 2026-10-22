@@ -8,6 +8,7 @@ export { cn } from "./cn";
 export { Button, buttonClasses } from "./Button";
 export type { ButtonProps } from "./Button";
 export { Card, SectionTitle, PageHeader } from "./Card";
+export { Page } from "./Page";
 export { Input } from "./Input";
 export { Badge, StatusPill } from "./Badge";
 export type { Tone } from "./Badge";

@@ -5,6 +5,8 @@ import { Button, Card, SegmentedControl, useToast } from "@/components/ui";
 import { DocumentScanner } from "@/components/scan/DocumentScanner";
 import { AadhaarFixHint } from "@/components/scan/AadhaarFixHint";
 import { useDataset } from "@/components/DatasetPanel";
+import { Avatar } from "@/components/desk/Avatar";
+import { ProfilePhotoAction } from "@/components/desk/ProfilePhotoAction";
 import { useSync } from "@/components/SyncProvider";
 import { createClient } from "@/lib/supabase/client";
 import { allLocal, asRosterStatus, getLocal, searchLocal, type LocalBeneficiary } from "@/lib/local-db";
@@ -31,7 +33,7 @@ const LEVEL_NOTE: Record<MatchLevel, string> = {
 function stub(c: Candidate): LocalBeneficiary {
   return {
     id: c.id, reg_no: c.reg_no, serial_no: null, batch: null, name: c.name, name_norm: "", aadhaar_last4: null,
-    dob: null, yob: null, appliances: [], review_note: null, attended_at: null, distributed_at: null, server_updated_at: "",
+    dob: null, yob: null, has_photo: false, appliances: [], review_note: null, attended_at: null, distributed_at: null, server_updated_at: "",
   };
 }
 
@@ -176,7 +178,8 @@ export function AttendanceDesk() {
   }, [items]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
+     <div className="space-y-4 lg:sticky lg:top-4">
       <SegmentedControl<Mode>
         label="How to find the person"
         value={mode}
@@ -193,7 +196,7 @@ export function AttendanceDesk() {
             inputMode="search"
             enterKeyHint="search"
             autoComplete="off"
-            placeholder="Reg. No., name or Aadhaar number"
+            placeholder="Reg. No. / name / Aadhaar"
             aria-label="Find by Reg. No., name or Aadhaar number"
             className="h-14 w-full rounded-2xl border border-line bg-white px-4 text-xl text-ink focus:border-teal-500 focus:outline-none focus:ring-4 focus:ring-teal-100"
           />
@@ -246,6 +249,9 @@ export function AttendanceDesk() {
         </div>
       )}
 
+     </div>
+
+     <div className="space-y-4">
       {loaded && !meta && (
         <p role="alert" className="rounded-2xl bg-warn-bg px-4 py-3 text-sm text-warn-fg">
           No list on this device. Connect and download the list first (button above).
@@ -268,7 +274,7 @@ export function AttendanceDesk() {
         <p className="py-4 text-center text-ink-muted">Type a Reg. No. (token), a name or a 12-digit Aadhaar to begin.</p>
       )}
 
-      <ul className="space-y-2">
+      <ul className="grid gap-3 xl:grid-cols-1">
         {hits.map((h) => {
           const r = h.row;
           const queued = attendanceByRoster.get(r.id);
@@ -279,8 +285,9 @@ export function AttendanceDesk() {
             <li key={r.id}>
               <Card className="space-y-3">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-14 min-w-14 items-center justify-center rounded-xl bg-ink px-2 text-xl font-extrabold text-white">{r.reg_no ?? "-"}</div>
+                  <Avatar id={r.id} name={r.name} size={64} refreshKey={items.length} />
                   <div className="min-w-0 flex-1">
+                    <span className="inline-block rounded-lg bg-ink px-2 py-0.5 text-lg font-extrabold text-white">{r.reg_no ?? "-"}</span>
                     <p className="truncate text-lg font-bold text-ink">{r.name}</p>
                     <p className="truncate text-sm text-ink-muted">
                       {r.appliances.map((a) => a.name).join(", ") || "No appliance listed"}
@@ -308,12 +315,16 @@ export function AttendanceDesk() {
                     {risky ? "Yes, same person. Mark attendance" : "Mark attendance"}
                   </Button>
                 )}
-                <Link href={`/distribution/profile?id=${r.id}`} className="block text-center text-sm font-semibold text-teal-700 underline">Open full record</Link>
+                <div className="space-y-1">
+                  <ProfilePhotoAction person={r} hasPhoto={r.has_photo} variant={done ? "primary" : "secondary"} full />
+                </div>
+                <a href={`/distribution/profile?id=${r.id}`} className="block py-1 text-center text-sm font-semibold text-teal-700 underline">Open full record</a>
               </Card>
             </li>
           );
         })}
       </ul>
+     </div>
     </div>
   );
 }

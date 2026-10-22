@@ -22,8 +22,21 @@ Mobile-first PWA for Freedom Trust's Chennai camp (24 Oct 2026, sponsor Vara). N
 - Phase 1 (test): scan registration writes `beneficiaries` (Aadhaar + UDID fields, `source='registered'`); documents go to `documents` bucket.
 - Reads/writes use the browser client under RLS (any authenticated user = staff). Server components use `lib/supabase/server.ts`.
 
+## Offline architecture (service worker)
+`scripts/make-sw.mjs` runs after every `next build` (npm `postbuild`) and writes `public/sw.js` + `public/precache-manifest.json` from `scripts/sw-template.js`. The worker:
+- INSTALL stores every build file (JS, CSS, fonts, icons, the QR decoder wasm) so a screen's code is on the phone even if it was never opened online.
+- Screens (HTML) are stored after sign-in (they need the login cookie, `precache-pages` message from `PwaRegister`) and served instantly from the phone, refreshed in the background (stale-while-revalidate). Network calls time out in a few seconds, so a dead wifi connection cannot hang the app.
+- Next.js client-side navigation (RSC) fails fast offline, which makes Next fall back to a normal page load that the worker answers from storage. Result links (`/distribution/profile?id=`) are plain `<a>` for the same reason.
+- Sign-out clears the stored screens (`clear-pages`). The scanner engine (tesseract, ~7 MB) is loaded once per phone by `warmOcrEngine` so the right WASM build is stored.
+- `src/lib/offline-ready.ts` reads the caches to show the Sync-screen checklist (list, files, screens, scanner): ticks are measured, not assumed.
+Only production builds register the worker (a dev server cannot be used to test offline).
+
 ## Offline queue (idb)
 Camp wifi is unreliable. Handover = a queued job `{id, roster_id, photo Blob, submission_id (uuid, generated at capture), created_at}` stored in IndexedDB. A sync loop (on `online`, app focus, 15 s timer) per job: upload photo to `handover-photos/{roster_id}/{submission_id}.jpg` (upsert) -> call `complete_distribution` -> delete job. Retries are safe because of the stable `submission_id` and idempotent RPC. UI shows "queued" until synced; attendance may also be queued (idempotent). Roster for search can be cached in IndexedDB after first load for offline lookup.
+
+## Photos
+- Profile photo (`camp_roster.profile_photo_path`, `beneficiaries.profile_photo_path`): taken for a specific person; stored in the private `documents` bucket at `profile/<roster id>/<uuid>.jpg` (registrations: `<beneficiary id>/profile.jpg`). `set_profile_photo()` refuses a path that does not start with that person's id. A 6 KB thumbnail is kept on the phone (`photos` store) so the picture shows offline.
+- Compression (`components/camera/compress.ts`): high-quality JPEG, gradual down-scaling, quality floor 0.86-0.88; only pixels are reduced if a file is over its cap. Handover 2048 px (~0.5-1.2 MB), profile 960x1280, scanned card 2600 px.
 
 ## OCR flow
 1. Capture/upload card image (client-side downscale).

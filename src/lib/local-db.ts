@@ -19,6 +19,8 @@ export interface LocalBeneficiary {
   /** yyyy-mm-dd or null (not captured yet) */
   dob: string | null;
   yob: number | null;
+  /** the server has a profile photo for this person (the picture itself is kept in the photos store) */
+  has_photo: boolean;
   appliances: Appliance[];
   review_note: string | null;
   attended_at: string | null;
@@ -43,6 +45,8 @@ interface LocalSchema extends DBSchema {
   };
   meta: { key: string; value: DatasetMeta };
   drafts: { key: string; value: DraftRecord };
+  /** small profile pictures (about 5-10 KB each) so a person's photo shows offline; keyed by person id */
+  photos: { key: string; value: { id: string; blob: Blob; savedAt: number } };
 }
 
 /** Unfinished work that is not yet a queued operation (half-filled form, photo not yet submitted). */
@@ -56,7 +60,7 @@ export interface DraftRecord {
 const DB_NAME = "freedomcare-local";
 let dbp: Promise<IDBPDatabase<LocalSchema>> | null = null;
 function db() {
-  dbp ??= openDB<LocalSchema>(DB_NAME, 2, {
+  dbp ??= openDB<LocalSchema>(DB_NAME, 3, {
     upgrade(d, oldVersion) {
       if (oldVersion < 1) {
         const r = d.createObjectStore("roster", { keyPath: "id" });
@@ -66,6 +70,7 @@ function db() {
         d.createObjectStore("meta", { keyPath: "key" });
       }
       if (oldVersion < 2) d.createObjectStore("drafts", { keyPath: "key" });
+      if (oldVersion < 3) d.createObjectStore("photos", { keyPath: "id" });
     },
   });
   return dbp;
@@ -85,6 +90,7 @@ export function toLocal(r: RosterRow): LocalBeneficiary {
     aadhaar_last4: r.aadhaar_no ? r.aadhaar_no.slice(-4) : null,
     dob: r.dob ?? null,
     yob: r.yob ?? null,
+    has_photo: !!r.profile_photo_path,
     appliances: r.appliances ?? [],
     review_note: r.review_note,
     attended_at: r.attended_at,
@@ -95,7 +101,7 @@ export function toLocal(r: RosterRow): LocalBeneficiary {
 
 const COLS_BASE = "id,reg_no,serial_no,batch,name,aadhaar_no,appliances,review_note,attended_at,distributed_at,updated_at";
 // dob/yob exist only after supabase/sql/3_staff_attendance_activity.sql; before that the download falls back to the base columns.
-const COLS_WITH_DOB = `${COLS_BASE},dob,yob`;
+const COLS_WITH_DOB = `${COLS_BASE},dob,yob,profile_photo_path`;
 const PAGE = 500;
 
 export type DownloadResult = { ok: true; meta: DatasetMeta } | { ok: false; message: string };
@@ -232,13 +238,21 @@ export async function listDrafts(): Promise<DraftRecord[]> {
   try { return await (await db()).getAll("drafts"); } catch { return []; }
 }
 
+export async function putThumb(personId: string, blob: Blob): Promise<void> {
+  await (await db()).put("photos", { id: personId, blob, savedAt: Date.now() });
+}
+export async function getThumb(personId: string): Promise<Blob | undefined> {
+  try { return (await (await db()).get("photos", personId))?.blob; } catch { return undefined; }
+}
+
 /** Removes cached beneficiary data (used on sign-out of a shared device). Does not touch the sync queue. */
 export async function clearLocalDataset(): Promise<void> {
   const d = await db();
-  const tx = d.transaction(["roster", "meta", "drafts"], "readwrite");
+  const tx = d.transaction(["roster", "meta", "drafts", "photos"], "readwrite");
   await tx.objectStore("roster").clear();
   await tx.objectStore("meta").clear();
   await tx.objectStore("drafts").clear();
+  await tx.objectStore("photos").clear();
   await tx.done;
 }
 

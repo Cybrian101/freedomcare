@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSync } from "@/components/SyncProvider";
 import { clearLocalDataset, listDrafts } from "@/lib/local-db";
+import { clearStoredScreens } from "@/lib/offline-ready";
 
 /**
  * Sign-out for a possibly shared device. It refuses while unsynced work exists (signing out would strand it),
@@ -45,6 +46,7 @@ export function SignOutForm({ email, action }: { email?: string; action: () => v
             e.preventDefault();
             const form = e.currentTarget;
             await clearLocalDataset().catch(() => undefined);
+            await clearStoredScreens(); // stored screens belong to the person who is signing out
             cleared.current = true;
             form.requestSubmit();
           }

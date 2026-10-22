@@ -17,6 +17,7 @@ const KIND: Record<QueueKind, { badge: string; tone: string; line: (i: QueueItem
     line: (i) => (i.docs?.aadhaar || i.docs?.udid ? "New member registered, with the scanned card" : "New member registered"),
   },
   link: { badge: "Details added", tone: "bg-amber-100 text-amber-900", line: () => "Aadhaar and date of birth added to the existing record", plural: "details added" },
+  profile: { badge: "Profile photo", tone: "bg-violet-100 text-violet-900", line: () => "Profile photo taken for this person", plural: "profile photo" },
 };
 
 /** One confirmed action for THIS login, from the server (works across phones). */
@@ -32,6 +33,7 @@ const DONE_KIND: Record<string, { badge: string; tone: string; line: string }> =
   distribution_completed: { badge: "Handover photo", tone: KIND.handover.tone, line: "Handover photo saved" },
   registered: { badge: "New member", tone: KIND.registration.tone, line: "New member registered" },
   details_added: { badge: "Details added", tone: KIND.link.tone, line: "Aadhaar and date of birth added" },
+  profile_photo_added: { badge: "Profile photo", tone: KIND.profile.tone, line: "Profile photo saved" },
   reg_no_assigned: { badge: "Reg. No.", tone: "bg-slate-100 text-slate-800", line: "Reg. No. assigned" },
 };
 const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
@@ -103,14 +105,14 @@ export default function QueuePage() {
     return () => { dead = true; };
   }, [online, me, syncedCount]);
 
-  const waiting = (["handover", "attendance", "registration", "link"] as QueueKind[])
+  const waiting = (["handover", "profile", "attendance", "registration", "link"] as QueueKind[])
     .map((k) => ({ k, n: unsynced.filter((i) => kindOf(i) === k).length }))
     .filter((x) => x.n > 0)
     .map((x) => `${x.n} ${KIND[x.k].plural}`)
     .join(", ");
 
   return (
-    <div className="mx-auto max-w-xl space-y-3 p-4">
+    <div className="mx-auto w-full max-w-xl space-y-3">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-900">
           Sync log{meName ? ` - ${meName}` : ""}{" "}
@@ -129,7 +131,7 @@ export default function QueuePage() {
         {online ? "Online." : "No internet - everything is safe on this phone and uploads when signal returns."}
         {waiting ? ` Still waiting: ${waiting}.` : " Nothing waiting."}
       </p>
-      <OfflineReadiness />
+      <OfflineReadiness compact />
       {storage?.persisted === false && (
         <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-900">
           Browser may clear stored photos if space runs low. Keep this device online soon, or install the app to the home screen.

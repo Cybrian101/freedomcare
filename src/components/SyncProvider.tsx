@@ -176,7 +176,7 @@ export function PendingBanner() {
     <Link
       href="/queue"
       role="status"
-      className={`block rounded-2xl px-4 py-3 text-sm font-bold mb-3 ${bad ? "bg-bad-bg text-bad-fg" : "bg-warn-bg text-warn-fg"}`}
+      className={`mx-auto mb-3 block w-full max-w-xl rounded-2xl px-4 py-3 text-sm font-bold ${bad ? "bg-bad-bg text-bad-fg" : "bg-warn-bg text-warn-fg"}`}
     >
       {pending} item{pending === 1 ? "" : "s"} not yet confirmed by the server
       {foreign > 0 ? ` - ${foreign} captured under another login` : failed > 0 ? ` - ${failed} need attention` : online ? " - sending..." : " - waiting for signal"}.

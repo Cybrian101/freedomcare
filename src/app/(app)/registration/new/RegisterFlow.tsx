@@ -9,6 +9,7 @@ import { useSearchParams } from "next/navigation";
 import { Button, Card, PageHeader, Stepper, useToast } from "@/components/ui";
 import { DocumentScanner } from "@/components/scan/DocumentScanner";
 import { ConfidenceField } from "@/components/scan/ConfidenceField";
+import { ProfilePhotoPicker } from "@/components/desk/ProfilePhotoPicker";
 import { createClient } from "@/lib/supabase/client";
 import { formatAadhaar } from "@/lib/aadhaar";
 import { normalizeUdid } from "@/lib/udid";
@@ -39,10 +40,10 @@ export function RegisterFlow() {
   const toast = useToast();
   const { items, retryItem } = useSync();
   const verify = params.get("verify") === "1";
-  const preset = digitsOnly(params.get("aadhaar"));
+  const [carried, setCarried] = useState(false);
 
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState<Form>(() => ({ ...EMPTY, aadhaar_no: preset.length === 12 ? formatAadhaar(preset) : "" }));
+  const [form, setForm] = useState<Form>(() => ({ ...EMPTY }));
   const [meta, setMeta] = useState<Partial<Record<FormKey, OcrField>>>({});
   const [review, setReview] = useState<Set<string>>(new Set());
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -51,11 +52,28 @@ export function RegisterFlow() {
   const [dupMsg, setDupMsg] = useState<{ text: string; href?: string } | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [saveErr, setSaveErr] = useState<string | null>(null);
-  const blobs = useRef<{ aadhaar?: Blob; udid?: Blob }>({});
+  const blobs = useRef<{ aadhaar?: Blob; udid?: Blob; profile?: Blob }>({});
+  const [profilePhoto, setProfilePhoto] = useState<Blob | null>(null);
   const DRAFT = "registration";
   // null = still checking the device; "none" = nothing to resume / decision made
   const [resume, setResume] = useState<{ name: string; at: number } | "none" | null>(null);
   const restored = useRef<{ form: Form; step: number; blobs?: { aadhaar?: Blob; udid?: Blob } } | null>(null);
+
+  // Details carried over from the scan screen. They travel in this tab's session storage, NOT in the address: a URL with an
+  // Aadhaar number in it would end up in browser history and in server logs.
+  useEffect(() => {
+    void Promise.resolve().then(() => {
+      try {
+        const raw = sessionStorage.getItem("fc.prefill");
+        if (!raw) return;
+        sessionStorage.removeItem("fc.prefill");
+        const p = JSON.parse(raw) as { aadhaar?: string; name?: string; dob?: string };
+        const a = digitsOnly(p.aadhaar);
+        setForm((f) => ({ ...f, aadhaar_no: a.length === 12 ? formatAadhaar(a) : f.aadhaar_no, name: f.name || p.name || "", dob: f.dob || p.dob || "" }));
+        if (a.length === 12) setCarried(true);
+      } catch { /* nothing carried over */ }
+    });
+  }, []);
 
   // Offer to continue an unfinished registration found on this device.
   useEffect(() => {
@@ -162,7 +180,10 @@ export function RegisterFlow() {
         source: "registered" as const,
       };
       // Persist to IndexedDB FIRST. "Saved" below means "safe on this device", not "on the server".
-      const item = await submitRegistration({ name: payload.name, payload, docs: blobs.current });
+      // The id is fixed now, so the photo's storage path is tied to THIS new person.
+      const newId = crypto.randomUUID();
+      const docs = { ...blobs.current, ...(profilePhoto ? { profile: profilePhoto } : {}) };
+      const item = await submitRegistration({ id: newId, name: payload.name, payload: { ...payload, profile_photo_path: profilePhoto ? `${newId}/profile.jpg` : null }, docs });
       setSavedId(item.id);
       await deleteDraft(DRAFT); // now in the sync queue
       toast("Saved on this device", "ok");
@@ -176,7 +197,7 @@ export function RegisterFlow() {
   function again() {
     void deleteDraft(DRAFT);
     setForm({ ...EMPTY }); setMeta({}); setReview(new Set()); setWarnings([]); setErrors({});
-    setSavedId(null); setDupMsg(null); blobs.current = {}; setStep(0);
+    setSavedId(null); setDupMsg(null); blobs.current = {}; setProfilePhoto(null); setStep(0);
   }
 
   const field = (k: FormKey, extra: Partial<React.ComponentProps<typeof ConfidenceField>> = {}) => (
@@ -189,7 +210,7 @@ export function RegisterFlow() {
     const confirmed = q?.status === "synced";
     const rejected = q?.status === "rejected";
     return (
-      <div className="mx-auto max-w-xl px-4 py-5 space-y-4">
+      <div className="mx-auto w-full max-w-xl space-y-4">
         <Card className="space-y-4 text-center">
           <h1 className={`text-2xl font-extrabold ${confirmed ? "text-ok-fg" : rejected ? "text-bad-fg" : "text-info-fg"}`}>
             {confirmed ? "Registered" : rejected ? "Needs review" : "Saved on this device - awaiting sync"}
@@ -212,7 +233,7 @@ export function RegisterFlow() {
 
   if (resume && resume !== "none") {
     return (
-      <div className="mx-auto max-w-xl px-4 py-5 space-y-4">
+      <div className="mx-auto w-full max-w-xl space-y-4">
         <Card className="space-y-3">
           <h1 className="text-lg font-extrabold text-ink">Unfinished registration found</h1>
           <p className="text-ink-muted">
@@ -230,7 +251,7 @@ export function RegisterFlow() {
   }
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-5 space-y-4">
+    <div className="mx-auto w-full max-w-xl space-y-4">
       <PageHeader title="Register beneficiary" subtitle="Scanning pre-fills the form. You confirm every field." />
       {verify && (
         <p role="status" className="rounded-2xl bg-warn-bg text-warn-fg px-4 py-3 text-sm font-semibold">
@@ -244,7 +265,7 @@ export function RegisterFlow() {
           <DocumentScanner kind="aadhaar"
             onResult={(r, blob) => { blobs.current.aadhaar = blob; applyResult(r); setStep(1); }}
             onManual={() => setStep(1)} />
-          {preset.length === 12 && <p className="text-sm text-ink-muted">Aadhaar number carried over from the scan screen.</p>}
+          {carried && <p className="text-sm text-ink-muted">Aadhaar number carried over from the scan screen.</p>}
         </>
       )}
 
@@ -270,6 +291,10 @@ export function RegisterFlow() {
               {[...new Set(warnings)].slice(0, 5).map((w) => <li key={w}>{w}</li>)}
             </ul>
           )}
+          <Card className="space-y-3">
+            <h2 className="font-bold text-ink">Profile photo</h2>
+            <ProfilePhotoPicker name={form.name} photo={profilePhoto} onChange={setProfilePhoto} />
+          </Card>
           <Card className="space-y-4">
             <h2 className="font-bold text-ink">Identity</h2>
             {field("aadhaar_no", { inputMode: "numeric", placeholder: "0000 0000 0000" })}

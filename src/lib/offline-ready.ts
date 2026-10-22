@@ -1,13 +1,17 @@
 "use client";
 // Truthful "will this phone work with no signal?" checks, read from the browser's own caches (not from a flag we set).
 
-/** Screens the service worker is asked to keep, so they open offline. */
-export const SHELL = ["/", "/registration", "/registration/new", "/attendance", "/distribution", "/distribution/profile", "/queue"];
+/** Screens the service worker stores after sign-in. Keep in sync with `pages` in scripts/make-sw.mjs. */
+export const SHELL = ["/", "/registration", "/registration/new", "/registration/assign", "/attendance", "/distribution", "/distribution/profile", "/queue", "/admin"];
 
-const PAGES = "fc-v1-pages";
-const STATIC = "fc-v1-static";
+const PAGES = "fc2-pages";
+const STATIC = "fc2-static";
 
 export interface Readiness {
+  /** the service worker is installed and controlling this page */
+  worker: boolean;
+  /** every build file (code, styles, fonts, icons) is stored */
+  files: boolean;
   /** every screen in SHELL is stored */
   screens: boolean;
   /** the on-device reader (worker + engine + English data) is stored */
@@ -16,26 +20,47 @@ export interface Readiness {
   supported: boolean;
 }
 
+const NONE: Readiness = { worker: false, files: false, screens: false, scanner: false, supported: false };
+
 export async function checkReadiness(): Promise<Readiness> {
-  if (typeof caches === "undefined" || !("serviceWorker" in navigator)) return { screens: false, scanner: false, supported: false };
+  if (typeof caches === "undefined" || !("serviceWorker" in navigator)) return NONE;
   try {
-    let screens = false;
-    let scanner = false;
-    if (await caches.has(PAGES)) {
-      const c = await caches.open(PAGES);
-      const hits = await Promise.all(SHELL.map((p) => c.match(p)));
-      screens = hits.every(Boolean);
-    }
+    const reg = await navigator.serviceWorker.getRegistration("/");
+    const out: Readiness = { ...NONE, supported: true, worker: !!reg?.active };
+
     if (await caches.has(STATIC)) {
       const c = await caches.open(STATIC);
-      const keys = (await c.keys()).map((r) => new URL(r.url).pathname);
-      scanner =
-        keys.includes("/tesseract/worker.min.js") &&
-        keys.includes("/tesseract/lang/eng.traineddata.gz") &&
-        keys.some((k) => /^\/tesseract\/tesseract-core.*\.js$/.test(k));
+      const stored = new Set((await c.keys()).map((r) => new URL(r.url).pathname));
+      const mres = await c.match("/precache-manifest.json");
+      if (mres) {
+        const m = (await mres.json()) as { assets: string[] };
+        out.files = m.assets.length > 0 && m.assets.every((a) => stored.has(a));
+      }
+      out.scanner =
+        stored.has("/tesseract/worker.min.js") &&
+        stored.has("/tesseract/lang/eng.traineddata.gz") &&
+        [...stored].some((k) => /^\/tesseract\/tesseract-core.*\.js$/.test(k));
     }
-    return { screens, scanner, supported: true };
+    if (await caches.has(PAGES)) {
+      const c = await caches.open(PAGES);
+      out.screens = (await Promise.all(SHELL.map((p) => c.match(p)))).every(Boolean);
+    }
+    return out;
   } catch {
-    return { screens: false, scanner: false, supported: true };
+    return { ...NONE, supported: true };
   }
+}
+
+/** Ask the worker (if any) to store the screens now. Needs signal and a signed-in session. */
+export async function precacheScreens(): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+  const reg = await navigator.serviceWorker.getRegistration("/");
+  reg?.active?.postMessage({ type: "precache-pages" });
+}
+
+/** Sign-out: remove the stored screens so the next person on a shared phone does not see them. */
+export async function clearStoredScreens(): Promise<void> {
+  try {
+    if (typeof caches !== "undefined") await caches.delete(PAGES);
+  } catch { /* nothing stored */ }
 }

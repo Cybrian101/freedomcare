@@ -10,7 +10,7 @@
 
 export type QueueStatus = 'queued' | 'syncing' | 'failed' | 'rejected' | 'synced'
 /** What the operation does. Items written before kinds existed have no `kind` and are handovers. */
-export type QueueKind = 'handover' | 'attendance' | 'registration' | 'link'
+export type QueueKind = 'handover' | 'attendance' | 'registration' | 'link' | 'profile'
 
 export interface QueueItem {
   id: string // == submissionId (also the IndexedDB key); for registrations == the new beneficiary uuid
@@ -19,7 +19,7 @@ export interface QueueItem {
    *  attendance: { dob } saved only if the record has none. link: { aadhaar_no, dob, yob } added to a listed person. */
   payload?: Record<string, unknown>
   /** registration only: scanned documents, uploaded after the row exists */
-  docs?: { aadhaar?: Blob; udid?: Blob }
+  docs?: { aadhaar?: Blob; udid?: Blob; profile?: Blob }
   docsUploaded?: string[]
   /** login that captured this item. The engine will not upload it under a different login unless `adopted`. */
   ownerId?: string
@@ -78,6 +78,8 @@ export interface QueueRemote {
   register(id: string, row: Record<string, unknown>): Promise<void>
   /** Upload a registration document (private bucket). Existing object == success. */
   uploadDoc(path: string, blob: Blob): Promise<void>
+  /** Attach an uploaded profile photo to a camp-list person (server checks the path belongs to that person). */
+  setProfile(rosterId: string, path: string): Promise<void>
 }
 
 export const kindOf = (i: Pick<QueueItem, 'kind'>): QueueKind => i.kind ?? 'handover'
@@ -99,6 +101,25 @@ export function newAttendanceItem(p: { rosterId: string; regNo: string | null; n
   return {
     id: p.id, kind: 'attendance', rosterId: p.rosterId, regNo: p.regNo, name: p.name, blob: null,
     payload: p.dob ? { dob: p.dob } : undefined,
+    submissionId: p.id, createdAt: now, status: 'queued', attempts: 0, lastError: null, nextAttemptAt: now,
+  }
+}
+
+/** Profile photo taken for a person on the camp list. The person is fixed at capture time (rosterId) and the storage path
+ *  is built from it, so the photo can only ever be attached to the person it was taken for. */
+export const profilePath = (rosterId: string, id: string) => `profile/${rosterId}/${id}.jpg`
+
+export function newProfileItem(p: {
+  rosterId: string
+  regNo: string | null
+  name?: string
+  blob: Blob
+  id: string
+  now?: number
+}): QueueItem {
+  const now = p.now ?? Date.now()
+  return {
+    id: p.id, kind: 'profile', rosterId: p.rosterId, regNo: p.regNo, name: p.name, blob: p.blob,
     submissionId: p.id, createdAt: now, status: 'queued', attempts: 0, lastError: null, nextAttemptAt: now,
   }
 }
@@ -125,7 +146,7 @@ export function newRegistrationItem(p: {
   id: string
   name: string
   payload: Record<string, unknown>
-  docs?: { aadhaar?: Blob; udid?: Blob }
+  docs?: { aadhaar?: Blob; udid?: Blob; profile?: Blob }
   now?: number
 }): QueueItem {
   const now = p.now ?? Date.now()
@@ -273,6 +294,18 @@ export class SyncEngine {
       if (kind === 'attendance') {
         await this.remote.attend(cur.rosterId, (cur.payload?.dob as string | undefined) ?? null)
         await this.store.put({ ...cur, status: 'synced', lastError: null, syncedAt: this.clock(), resolution: 'created' })
+        return true
+      }
+      if (kind === 'profile') {
+        if (!cur.blob && !cur.uploaded) throw new QueueError('permanent', 'Photo data missing on this device')
+        const path = profilePath(cur.rosterId, cur.id)
+        if (!cur.uploaded && cur.blob) {
+          await this.remote.uploadDoc(path, cur.blob) // repeat-safe
+          cur = { ...cur, uploaded: true }
+          await this.store.put(cur)
+        }
+        await this.remote.setProfile(cur.rosterId, path)
+        await this.store.put({ ...cur, blob: null, status: 'synced', lastError: null, syncedAt: this.clock(), resolution: 'created' })
         return true
       }
       if (kind === 'link') {

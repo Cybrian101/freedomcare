@@ -23,6 +23,7 @@ function what(e: Entry): { label: string; tone: string } {
     case "distribution_completed": return { label: "Handover photo", tone: "bg-ok-bg text-ok-fg" };
     case "registered": return { label: `New member${d.aadhaar ? " + Aadhaar" : ""}${d.udid ? " + UDID" : ""}`, tone: "bg-teal-50 text-teal-800" };
     case "details_added": return { label: `Details added${d.aadhaar ? " (Aadhaar" : ""}${d.dob ? `${d.aadhaar ? " + " : " ("}DOB` : ""}${d.aadhaar || d.dob ? ")" : ""}`, tone: "bg-warn-bg text-warn-fg" };
+    case "profile_photo_added": return { label: "Profile photo", tone: "bg-violet-100 text-violet-900" };
     case "reg_no_assigned": return { label: "Reg. No. assigned", tone: "bg-sage-100 text-ink-soft" };
     default: return { label: e.action.replace(/_/g, " "), tone: "bg-sage-100 text-ink-soft" };
   }

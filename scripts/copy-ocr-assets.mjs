@@ -14,3 +14,10 @@ const lang = 'node_modules/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata
 if (!existsSync(lang)) throw new Error('Missing @tesseract.js-data/eng; run npm install')
 cpSync(lang, join(out, 'lang/eng.traineddata.gz'))
 console.log('OCR assets copied to', out)
+
+// QR decoder (ZXing, WebAssembly) for the QR printed on Aadhaar cards. Served from this site so it also works offline.
+mkdirSync('public/zxing', { recursive: true })
+const zx = 'node_modules/zxing-wasm/dist/reader/zxing_reader.wasm'
+if (!existsSync(zx)) throw new Error('Missing zxing-wasm; run npm install')
+cpSync(zx, 'public/zxing/zxing_reader.wasm')
+console.log('QR decoder copied to public/zxing')

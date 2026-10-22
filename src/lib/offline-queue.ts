@@ -2,13 +2,16 @@
 // Browser wiring for the handover-photo queue: IndexedDB store + Supabase remote + singleton engine + triggers.
 import { openDB, type IDBPDatabase } from "idb";
 import { createClient } from "@/lib/supabase/client";
-import { completeDistribution, linkAadhaar, markAttendance } from "@/lib/roster";
+import { completeDistribution, linkAadhaar, markAttendance, setProfilePhoto } from "@/lib/roster";
+import { putThumb } from "@/lib/local-db";
+import { makeThumbnail } from "@/components/camera/compress";
 import {
   QueueError,
   SyncEngine,
   newItem,
   newAttendanceItem,
   newLinkItem,
+  newProfileItem,
   newRegistrationItem,
   type CompleteResult,
   type QueueItem,
@@ -47,7 +50,7 @@ export const idbStore: QueueStore = {
 };
 
 const NET_RE = /failed to fetch|networkerror|network request failed|load failed|timeout|timed out|aborted|offline/i;
-const PERM_RE = /beneficiary not found|photo required|different aadhaar|already on another record|invalid aadhaar format|invalid input syntax for type uuid|beneficiaries_aadhaar_no_key|violates (check|not-null)/i;
+const PERM_RE = /beneficiary not found|photo path does not belong|photo required|different aadhaar|already on another record|invalid aadhaar format|invalid input syntax for type uuid|beneficiaries_aadhaar_no_key|violates (check|not-null)/i;
 const DUP_RE = /already exists|duplicate|resource already/i;
 
 function classify(e: unknown): QueueError {
@@ -85,6 +88,13 @@ const remote: QueueRemote = {
       throw classify(e);
     }
   },
+  async setProfile(rosterId, path) {
+    try {
+      await setProfilePhoto(createClient(), rosterId, path);
+    } catch (e) {
+      throw classify(e);
+    }
+  },
   async link(rosterId, aadhaar, dob, yob) {
     try {
       await linkAadhaar(createClient(), rosterId, aadhaar, dob, yob);
@@ -93,7 +103,9 @@ const remote: QueueRemote = {
     }
   },
   async register(id, row) {
-    const { error } = await createClient().from("beneficiaries").insert({ ...row, id });
+    // A database that has not had the profile-photo column added yet must still accept registrations without a photo.
+    const { profile_photo_path, ...rest } = row as { profile_photo_path?: string | null } & Record<string, unknown>;
+    const { error } = await createClient().from("beneficiaries").insert({ ...(profile_photo_path ? { ...rest, profile_photo_path } : rest), id });
     if (!error) return;
     // Same client-generated id already inserted by an earlier attempt whose response was lost: success.
     if (error.code === "23505" && /beneficiaries_pkey/.test(error.message)) return;
@@ -156,6 +168,19 @@ export async function submitAttendance(p: { rosterId: string; regNo: string | nu
   return item;
 }
 
+/**
+ * Profile photo for a camp-list person. The photo is kept on the phone first (and a small copy is stored so the picture
+ * shows next to the person straight away, even offline), then uploaded and attached by the sync engine.
+ */
+export async function submitProfilePhoto(p: { rosterId: string; regNo: string | null; name?: string; blob: Blob }): Promise<QueueItem> {
+  const item = stamp(newProfileItem({ ...p, id: crypto.randomUUID() }));
+  const eng = getEngine();
+  await eng.enqueue(item);
+  try { await putThumb(p.rosterId, await makeThumbnail(p.blob)); } catch { /* the photo is safe in the queue; only the preview is missing */ }
+  void eng.runOnce();
+  return item;
+}
+
 /** Add an Aadhaar (and DOB) to a listed person who had none. Saved on the device first, like everything else. */
 export async function submitLink(p: {
   rosterId: string;
@@ -177,7 +202,7 @@ export async function submitRegistration(p: {
   id?: string;
   name: string;
   payload: Record<string, unknown>;
-  docs?: { aadhaar?: Blob; udid?: Blob };
+  docs?: { aadhaar?: Blob; udid?: Blob; profile?: Blob };
 }): Promise<QueueItem> {
   const id = p.id ?? crypto.randomUUID();
   const item = stamp(newRegistrationItem({ id, name: p.name, payload: { ...p.payload, id }, docs: p.docs }));

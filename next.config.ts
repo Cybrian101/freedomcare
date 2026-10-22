@@ -15,7 +15,10 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     // The service worker must always be revalidated so a new build can take over.
-    return [{ source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }, { key: "Service-Worker-Allowed", value: "/" }] }];
+    return [
+      { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }, { key: "Service-Worker-Allowed", value: "/" }] },
+      { source: "/precache-manifest.json", headers: [{ key: "Cache-Control", value: "no-cache" }] },
+    ];
   },
   turbopack: {
     rules: {

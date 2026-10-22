@@ -25,41 +25,95 @@ async function decode(src: Blob): Promise<Drawable> {
   }
 }
 
-/** Downscale + re-encode an image to JPEG, targeting <= maxBytes (default 1.5MB). */
-export async function compressImage(
-  src: Blob,
-  opts: { maxBytes?: number; maxDim?: number } = {},
-): Promise<Blob> {
-  const maxBytes = opts.maxBytes ?? 1.5 * 1024 * 1024;
-  let maxDim = opts.maxDim ?? 1600;
+export type PhotoKind = "handover" | "profile" | "document";
+
+export interface CompressOpts {
+  /** longest side in pixels */
+  maxDim: number;
+  /** first JPEG quality tried (0-1) */
+  quality: number;
+  /** quality is never lowered below this: if the file is still too big, the pixels are reduced instead */
+  minQuality: number;
+  maxBytes: number;
+  /** centre-crop to this width/height ratio first (profile photos) */
+  aspect?: number;
+}
+
+/**
+ * Stored photos are made smaller WITHOUT visible loss: high JPEG quality (never below `minQuality`), gradual
+ * down-scaling with a high-quality filter, and a generous size cap. Only when a file is still over the cap are the pixels
+ * reduced a little, never the quality. Typical results: handover ~0.6-1.2 MB, profile ~120-250 KB, scanned card ~1-2 MB.
+ */
+export const PRESETS: Record<PhotoKind, CompressOpts> = {
+  handover: { maxDim: 2048, quality: 0.9, minQuality: 0.86, maxBytes: 2.5 * 1024 * 1024 },
+  profile: { maxDim: 1280, quality: 0.92, minQuality: 0.88, maxBytes: 700 * 1024, aspect: 3 / 4 },
+  document: { maxDim: 2600, quality: 0.9, minQuality: 0.86, maxBytes: 3 * 1024 * 1024 },
+};
+
+function newCanvas(w: number, h: number) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error("Canvas unavailable");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  return { c, ctx };
+}
+
+/** Scale in steps of at most 2x: one big jump makes thin lines and text look jagged. */
+function scaleTo(src: CanvasImageSource, sx: number, sy: number, sw: number, sh: number, tw: number, th: number): HTMLCanvasElement {
+  let cur: CanvasImageSource = src;
+  let cx = sx, cy = sy, cw = sw, ch = sh;
+  while (cw / 2 > tw && ch / 2 > th) {
+    const nw = Math.round(cw / 2), nh = Math.round(ch / 2);
+    const { c, ctx } = newCanvas(nw, nh);
+    ctx.drawImage(cur, cx, cy, cw, ch, 0, 0, nw, nh);
+    cur = c; cx = 0; cy = 0; cw = nw; ch = nh;
+  }
+  const { c, ctx } = newCanvas(tw, th);
+  ctx.drawImage(cur, cx, cy, cw, ch, 0, 0, tw, th);
+  return c;
+}
+
+const toJpeg = (c: HTMLCanvasElement, q: number) =>
+  new Promise<Blob | null>((res) => c.toBlob(res, "image/jpeg", q));
+
+/** Re-encode an image as a high-quality JPEG (EXIF orientation applied). Pass a PhotoKind or explicit options. */
+export async function compressImage(src: Blob, kindOrOpts: PhotoKind | CompressOpts = "handover"): Promise<Blob> {
+  const o = typeof kindOrOpts === "string" ? PRESETS[kindOrOpts] : kindOrOpts;
   const bmp = await decode(src);
   try {
-    let quality = 0.82;
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
-      const w = Math.max(1, Math.round(bmp.width * scale));
-      const h = Math.max(1, Math.round(bmp.height * scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Canvas unavailable");
-      ctx.drawImage(bmp.draw, 0, 0, w, h);
-      const out = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/jpeg", quality));
-      if (!out) throw new Error("Could not encode photo");
-      if (out.size <= maxBytes) return out;
-      quality = Math.max(0.5, quality - 0.1);
-      maxDim = Math.round(maxDim * 0.85);
+    // optional centre crop (portrait for profile photos; slightly above centre keeps heads in frame)
+    let sx = 0, sy = 0, sw = bmp.width, sh = bmp.height;
+    if (o.aspect) {
+      const have = sw / sh;
+      if (have > o.aspect) { sw = Math.round(sh * o.aspect); sx = Math.round((bmp.width - sw) / 2); }
+      else if (have < o.aspect) { sh = Math.round(sw / o.aspect); sy = Math.round((bmp.height - sh) * 0.35); }
     }
-    // Last resort: smallest settings
-    const c = document.createElement("canvas");
-    c.width = 1000;
-    c.height = Math.round((1000 * bmp.height) / bmp.width);
-    c.getContext("2d")!.drawImage(bmp.draw, 0, 0, c.width, c.height);
-    const last = await new Promise<Blob | null>((res) => c.toBlob(res, "image/jpeg", 0.6));
-    if (!last) throw new Error("Could not encode photo");
-    return last;
+    let maxDim = o.maxDim;
+    let best: Blob | null = null;
+    for (let size = 0; size < 8; size++) {
+      const scale = Math.min(1, maxDim / Math.max(sw, sh));
+      const tw = Math.max(1, Math.round(sw * scale));
+      const th = Math.max(1, Math.round(sh * scale));
+      const canvas = scaleTo(bmp.draw, sx, sy, sw, sh, tw, th);
+      for (let q = o.quality; q >= o.minQuality - 1e-6; q -= 0.02) {
+        const out = await toJpeg(canvas, q);
+        if (!out) throw new Error("Could not encode photo");
+        best = out;
+        if (out.size <= o.maxBytes) return out;
+      }
+      maxDim = Math.round(maxDim * 0.9); // still too big at the quality floor: reduce pixels a little, keep quality
+    }
+    if (!best) throw new Error("Could not encode photo");
+    return best;
   } finally {
     bmp.close?.();
   }
+}
+
+/** Tiny square-ish JPEG kept on the phone to show a person's picture offline (about 5-10 KB). */
+export async function makeThumbnail(src: Blob, size = 192): Promise<Blob> {
+  return compressImage(src, { maxDim: size, quality: 0.82, minQuality: 0.7, maxBytes: 30 * 1024 });
 }

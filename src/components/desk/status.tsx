@@ -1,4 +1,5 @@
 import type { RosterRow } from "@/lib/types";
+import { Badge, type Tone } from "@/components/ui";
 
 export type DeskStatus = "not_arrived" | "attended" | "distributed";
 
@@ -13,25 +14,15 @@ const LABEL: Record<DeskStatus, string> = {
   attended: "Attended",
   distributed: "Distributed",
 };
-const TONE: Record<DeskStatus, string> = {
-  not_arrived: "bg-slate-100 text-slate-700 border-slate-300",
-  attended: "bg-amber-100 text-amber-900 border-amber-300",
-  distributed: "bg-emerald-100 text-emerald-900 border-emerald-300",
-};
+const TONE: Record<DeskStatus, Tone> = { not_arrived: "neutral", attended: "info", distributed: "ok" };
 
 export function DeskPill({ status }: { status: DeskStatus }) {
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${TONE[status]}`}>
-      {LABEL[status]}
-    </span>
-  );
+  return <Badge tone={TONE[status]} dot>{LABEL[status]}</Badge>;
 }
 
 export const STATUS_LABEL = LABEL;
 
 export function SideChip({ side }: { side: string | null }) {
   if (!side) return null;
-  return (
-    <span className="rounded-md bg-sky-100 px-1.5 py-0.5 text-xs font-bold uppercase text-sky-900">{side}</span>
-  );
+  return <Badge tone="info" className="uppercase">{side}</Badge>;
 }

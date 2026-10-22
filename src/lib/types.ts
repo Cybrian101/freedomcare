@@ -17,6 +17,8 @@ export interface RosterRow {
   /** yyyy-mm-dd; filled when an Aadhaar is linked or attendance is taken with a date of birth */
   dob?: string | null;
   yob?: number | null;
+  /** path in the private 'documents' bucket, set by set_profile_photo */
+  profile_photo_path?: string | null;
   appliances: Appliance[];
   review_note: string | null;
   attended_at: string | null;
@@ -57,6 +59,7 @@ export interface Beneficiary extends AadhaarFields, UdidFields {
   id: string;
   name: string;
   source: "excel" | "registered";
+  profile_photo_path?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -12,6 +12,7 @@ type CampRosterRow = {
   aadhaar_no: string | null
   dob?: string | null
   yob?: number | null
+  profile_photo_path?: string | null
   appliances: Json
   review_note: string | null
   attended_at: string | null
@@ -76,6 +77,10 @@ export type Database = {
     Functions: {
       mark_attendance: {
         Args: { p_id: string; p_dob?: string | null }
+        Returns: CampRosterRow
+      }
+      set_profile_photo: {
+        Args: { p_roster_id: string; p_path: string }
         Returns: CampRosterRow
       }
       link_aadhaar: {

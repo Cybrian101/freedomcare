@@ -41,11 +41,26 @@ function guessName(lines: string[]): string | null {
   // card front: Name, then DOB, then gender. Anchor on whichever of those lines was read.
   let anchor = lines.findIndex((l) => /\bdob\b|date of birth|year of birth|\byob\b/i.test(l));
   if (anchor === -1) anchor = lines.findIndex((l) => /\b(fe)?male\b|transgender/i.test(l));
-  for (let i = anchor - 1; i >= 0; i--) {
+  // Several lines above the anchor can look "name-like" (OCR noise from the photo box or the logo). Prefer the one with the
+  // most real words and letters; on a tie the line nearest the anchor wins.
+  let best: { name: string; score: number } | null = null;
+  for (let i = anchor - 1; i >= Math.max(0, anchor - 6); i--) {
     const n = asName(lines[i]);
-    if (n) return n;
+    if (!n) continue;
+    const words = n.split(" ").filter(Boolean);
+    const score = words.filter((w) => w.replace(/\./g, "").length >= 3).length * 2 + words.filter((w) => /^[A-Z]/.test(w)).length + n.replace(/[^A-Za-z]/g, "").length;
+    if (!best || score > best.score) best = { name: n, score };
   }
-  return null;
+  return best ? dropTrailingJunk(best.name) : null;
+}
+
+/** "Sundari Devi Raman ROR BRE": noise from the next part of the card glued onto a correctly read mixed-case name. */
+function dropTrailingJunk(name: string): string {
+  const words = name.split(" ");
+  const mixed = words.filter((w) => /^[A-Z][a-z]{2,}/.test(w)).length;
+  if (mixed < 2) return name; // an all-capitals name is printed that way: leave it alone
+  while (words.length > 2 && /^[A-Z]{2,4}$/.test(words[words.length - 1]!)) words.pop(); // keeps single-letter initials such as "S"
+  return words.join(" ");
 }
 
 function findDob(lines: string[]): RawField {

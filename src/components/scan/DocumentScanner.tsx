@@ -18,7 +18,7 @@ export interface DocumentScannerProps {
 type Phase = "idle" | "preparing" | "ready" | "reading" | "error";
 
 const COPY: Record<OcrKind, { title: string; tip: string }> = {
-  aadhaar: { title: "Aadhaar card", tip: "Place the card flat, fill the frame, avoid glare. The photo is only used to pre-fill the form; you confirm every field." },
+  aadhaar: { title: "Aadhaar card", tip: "Lay the card flat and let it FILL the photo, with the QR code (the square on the card) and the 12-digit number sharp and large. Avoid glare and shadows. The photo only pre-fills the form; you confirm every field." },
   udid: { title: "UDID / disability document", tip: "Photograph the UDID card or enrolment acknowledgement. The photo only pre-fills the form; you confirm every field." },
 };
 
@@ -106,9 +106,10 @@ export function DocumentScanner({ kind, onResult, onManual, title }: DocumentSca
   async function runLocal(p: PreparedImage): Promise<{ result: OcrResult | null; found: boolean }> {
     setLocalPct(0);
     try {
-      const r = await readLocal(kind, p.blob, setLocalPct);
+      const r = await readLocal(kind, p.ocrBlob, setLocalPct, p.original); // full-resolution copies, not the stored one
       const result = normalizeModelOutput(r.raw, kind, 1);
       result.warnings.unshift("Read on this device. Check every field against the document.");
+      for (const n of r.notes) result.warnings.push(n);
       if (r.rotatedTurns !== 0) result.warnings.push("The card was photographed sideways; it was turned automatically.");
       const key = kind === "aadhaar" ? "aadhaar_no" : "udid_no";
       if (!result.needsReview.includes(key)) result.needsReview.push(key);

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button, Card, PageHeader, useToast } from "@/components/ui";
 import { DocumentScanner } from "@/components/scan/DocumentScanner";
 import { AadhaarFixHint } from "@/components/scan/AadhaarFixHint";
+import { ProfilePhotoPicker } from "@/components/desk/ProfilePhotoPicker";
 import { DatasetPanel, useDataset } from "@/components/DatasetPanel";
 import { useSync } from "@/components/SyncProvider";
 import { createClient } from "@/lib/supabase/client";
@@ -57,6 +58,7 @@ export default function RegistrationPage() {
   const [scanKey, setScanKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const image = useRef<Blob | null>(null);
+  const [profilePhoto, setProfilePhoto] = useState<Blob | null>(null);
   const { ready } = useDataset();
 
   const digits = digitsOnly(num);
@@ -76,6 +78,7 @@ export default function RegistrationPage() {
   }
   function reset() {
     image.current = null;
+    setProfilePhoto(null);
     setNum(""); setCard(EMPTY); setScanKey((k) => k + 1); setStep({ s: "capture" });
   }
   async function lookup() {
@@ -111,7 +114,14 @@ export default function RegistrationPage() {
         source: "registered" as const,
       };
       // Saved on this device first; the server's unique Aadhaar rule re-checks it when it syncs.
-      const item = await submitRegistration({ name, payload, docs: image.current ? { aadhaar: image.current } : undefined });
+      // The id is fixed now, so the profile photo's storage path is tied to THIS new person.
+      const newId = crypto.randomUUID();
+      const docs = { ...(image.current ? { aadhaar: image.current } : {}), ...(profilePhoto ? { profile: profilePhoto } : {}) };
+      const item = await submitRegistration({
+        id: newId, name,
+        payload: { ...payload, profile_photo_path: profilePhoto ? `${newId}/profile.jpg` : null },
+        docs: Object.keys(docs).length ? docs : undefined,
+      });
       toast("Saved on this device", "ok");
       setStep({ s: "saved", id: item.id, name, kind: "registration" });
     } catch {
@@ -140,7 +150,7 @@ export default function RegistrationPage() {
   }
 
   return (
-    <div className="mx-auto max-w-xl px-4 py-5 space-y-4">
+    <div className="mx-auto w-full max-w-xl space-y-4">
       <PageHeader title="Registration" subtitle="Scan the Aadhaar to find the existing record, or register someone new" />
       <DatasetPanel compact />
 
@@ -209,6 +219,7 @@ export default function RegistrationPage() {
       {step.s === "result" && (
         <Result
           outcome={step.outcome} digits={digits} card={card} ready={ready} saving={saving}
+          photo={profilePhoto} onPhoto={setProfilePhoto}
           onEdit={edit} onRetry={lookup} onReset={reset} onSaveNew={saveNew} onLink={linkTo}
         />
       )}
@@ -289,12 +300,16 @@ function ListedWithoutAadhaar({ card, saving, onLink }: { card: CardFields; savi
   );
 }
 
-function Result({ outcome, digits, card, ready, saving, onEdit, onRetry, onReset, onSaveNew, onLink }: {
-  outcome: MatchOutcome; digits: string; card: CardFields; ready: boolean; saving: boolean;
+function Result({ outcome, digits, card, ready, saving, photo, onPhoto, onEdit, onRetry, onReset, onSaveNew, onLink }: {
+  outcome: MatchOutcome; digits: string; card: CardFields; ready: boolean; saving: boolean; photo: Blob | null; onPhoto: (b: Blob | null) => void;
   onEdit: () => void; onRetry: () => void; onReset: () => void; onSaveNew: () => void; onLink: (r: LocalBeneficiary) => void;
 }) {
   const start = canStartRegistration(outcome, { datasetReady: ready });
-  const regHref = `/registration/new?aadhaar=${digits}${start === "draft_needs_verification" ? "&verify=1" : ""}`;
+  const regHref = `/registration/new${start === "draft_needs_verification" ? "?verify=1" : ""}`;
+  // The details go with the person to the next screen through session storage, never through the address (URLs are logged).
+  useEffect(() => {
+    try { sessionStorage.setItem("fc.prefill", JSON.stringify({ aadhaar: digits, name: card.name, dob: card.dob })); } catch { /* private mode: they retype */ }
+  }, [digits, card.name, card.dob]);
   const cardLine = `${card.name || "Name not read"}${card.dob ? ` · born ${card.dob}` : ""}`;
 
   if (outcome.kind === "confirmed_match") {
@@ -346,6 +361,10 @@ function Result({ outcome, digits, card, ready, saving, onEdit, onRetry, onReset
           The server was checked and no record has Aadhaar {maskAadhaar(digits)}. On the card: <b>{cardLine}</b>.
         </p>
         <ListedWithoutAadhaar card={card} saving={saving} onLink={onLink} />
+        <div className="space-y-2 rounded-2xl border border-line p-3">
+          <p className="text-sm font-bold text-ink">Profile photo (optional)</p>
+          <ProfilePhotoPicker name={card.name} photo={photo} onChange={onPhoto} />
+        </div>
         <Button size="lg" full loading={saving} onClick={() => onSaveNew()}>Save as new member</Button>
         <p className="text-xs text-ink-muted">Saves the name, date of birth and other details read from the card. The Reg. No. is assigned later.</p>
         <Button href={regHref} variant="secondary" full>Register with disability document</Button>
@@ -362,6 +381,10 @@ function Result({ outcome, digits, card, ready, saving, onEdit, onRetry, onReset
       <ListedWithoutAadhaar card={card} saving={saving} onLink={onLink} />
       {start === "draft_needs_verification" && (
         <>
+          <div className="space-y-2 rounded-2xl border border-line p-3">
+            <p className="text-sm font-bold text-ink">Profile photo (optional)</p>
+            <ProfilePhotoPicker name={card.name} photo={photo} onChange={onPhoto} />
+          </div>
           <Button variant="secondary" full loading={saving} onClick={() => onSaveNew()}>
             Save as new member (will be re-checked for duplicates when online)
           </Button>

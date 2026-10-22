@@ -74,6 +74,11 @@ export async function completeDistribution(
   )!;
 }
 
+/** Attach an already-uploaded profile photo (path profile/<id>/<uuid>.jpg) to this person. Repeat-safe. */
+export async function setProfilePhoto(supabase: SupabaseClient, id: string, path: string): Promise<RosterRow> {
+  return must(await supabase.rpc("set_profile_photo", { p_roster_id: id, p_path: path }).single<RosterRow>())!;
+}
+
 export interface RosterCounts {
   total: number;
   attended: number;

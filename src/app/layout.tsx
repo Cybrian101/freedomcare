@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { ToastProvider } from "@/components/ui/Toast";
+import { PwaRegister } from "@/components/PwaRegister";
 import "./globals.css";
 
 const sans = Plus_Jakarta_Sans({
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${sans.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col bg-white text-ink">
+        <PwaRegister />
         <ToastProvider>
           <Suspense fallback={null}>{children}</Suspense>
         </ToastProvider>

@@ -2,10 +2,11 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { rosterCounts } from "@/lib/roster";
-import Link from "next/link";
 import { DatasetPanel } from "@/components/DatasetPanel";
 import { EndOfDayCard } from "@/components/SyncProvider";
-import { Card, PageHeader, ProgressRing, SectionTitle, Skeleton, Stat } from "@/components/ui";
+import { Card, Page, PageHeader, ProgressRing, SectionTitle, Skeleton, Stat } from "@/components/ui";
+import { OfflineReadiness } from "@/components/OfflineReadiness";
+import { InstallPrompt } from "@/components/InstallPrompt";
 
 async function Totals() {
   await connection();
@@ -42,7 +43,7 @@ async function Totals() {
 
 export function Dashboard() {
   return (
-    <>
+    <Page width="wide">
       <PageHeader title="Camp dashboard" subtitle="Distribution camp, Santhome, Chennai · 24 Oct 2026" />
       <Suspense
         fallback={
@@ -60,22 +61,32 @@ export function Dashboard() {
       </Suspense>
 
       <SectionTitle>Workflows</SectionTitle>
-      <div className="grid gap-3">
-        <Link href="/registration" className="block rounded-3xl border border-teal-200 bg-teal-50 p-5 active:scale-[0.99] transition-transform">
-          <div className="text-2xl font-extrabold text-teal-900">Registration</div>
-          <p className="mt-1 text-teal-900/80">Scan Aadhaar and disability documents, find the existing record or register someone new.</p>
-        </Link>
-        <Link href="/distribution" className="block rounded-3xl border border-emerald-200 bg-emerald-50 p-5 active:scale-[0.99] transition-transform">
-          <div className="text-2xl font-extrabold text-emerald-900">Distribution</div>
-          <p className="mt-1 text-emerald-900/80">Look up the Reg. No., mark attendance and photograph the handover.</p>
-        </Link>
+      <div className="grid gap-3 md:grid-cols-3">
+        <a href="/registration" className="block rounded-3xl border border-teal-200 bg-teal-50 p-5 active:scale-[0.99] transition-transform">
+          <div className="text-2xl font-extrabold text-teal-900">Register</div>
+          <p className="mt-1 text-teal-900/80">Scan the Aadhaar, find the record or add a new member, and take a profile photo.</p>
+        </a>
+        <a href="/attendance" className="block rounded-3xl border border-sky-200 bg-sky-50 p-5 active:scale-[0.99] transition-transform">
+          <div className="text-2xl font-extrabold text-sky-700">Attendance</div>
+          <p className="mt-1 text-sky-700/80">Mark who has arrived by Reg. No., name, Aadhaar scan, or name and date of birth.</p>
+        </a>
+        <a href="/distribution" className="block rounded-3xl border border-emerald-200 bg-emerald-50 p-5 active:scale-[0.99] transition-transform">
+          <div className="text-2xl font-extrabold text-emerald-900">Distribute</div>
+          <p className="mt-1 text-emerald-900/80">Call the token number, find the person and photograph the handover.</p>
+        </a>
       </div>
 
-      <SectionTitle>This device</SectionTitle>
-      <EndOfDayCard />
-      <div className="mt-3">
-        <DatasetPanel />
+      <SectionTitle>This phone</SectionTitle>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="space-y-3">
+          <EndOfDayCard />
+          <DatasetPanel />
+        </div>
+        <div className="space-y-3">
+          <OfflineReadiness />
+          <InstallPrompt />
+        </div>
       </div>
-    </>
+    </Page>
   );
 }

@@ -10,7 +10,7 @@ const out = ts.transpileModule(src, { compilerOptions: { module: 'ESNext', targe
 mkdirSync('.tmp-test', { recursive: true })
 writeFileSync('.tmp-test/queue-core.mjs', out)
 const core = await import(pathToFileURL(process.cwd() + '/.tmp-test/queue-core.mjs').href)
-const { SyncEngine, QueueError, newItem, newAttendanceItem, newLinkItem, newRegistrationItem, photoPath, backoffMs } = core
+const { SyncEngine, QueueError, newItem, newAttendanceItem, newLinkItem, newProfileItem, profilePath, newRegistrationItem, photoPath, backoffMs } = core
 
 function mk() {
   const db = new Map()
@@ -20,12 +20,16 @@ function mk() {
     put: async (i) => void db.set(i.id, { ...i }),
     delete: async (id) => void db.delete(id),
   }
-  const net = { up: true, uploads: 0, completes: 0, serverSub: null, completeErr: null, attends: 0, lastDob: undefined, links: [], linkErr: null, regs: new Set(), regCalls: 0, docs: 0, regErr: null, docFailOnce: false }
+  const net = { up: true, uploads: 0, completes: 0, serverSub: null, completeErr: null, attends: 0, lastDob: undefined, links: [], profiles: [], linkErr: null, regs: new Set(), regCalls: 0, docs: 0, regErr: null, docFailOnce: false }
   const remote = {
     attend: async (_r, dob) => {
       if (!net.up) throw new QueueError('network', 'x')
       net.attends++
       net.lastDob = dob
+    },
+    setProfile: async (r, path) => {
+      if (!net.up) throw new QueueError('network', 'x')
+      net.profiles.push({ r, path })
     },
     link: async (r, a, dob, yob) => {
       if (!net.up) throw new QueueError('network', 'x')
@@ -273,4 +277,19 @@ test('link Aadhaar: queued offline, sent once online, permanent conflict is park
   await eng.enqueue(newLinkItem({ rosterId: 'r2', regNo: '13', id: 'l2', aadhaar: '234567890107', now: 1_000_002 }))
   await eng.runOnce()
   assert.equal(db.get('l2').status, 'rejected')
+})
+
+test('profile photo: uploads under the person id, attaches once, survives going offline mid-way', async () => {
+  const { db, net, eng } = mk()
+  net.up = false
+  await eng.enqueue(newProfileItem({ rosterId: 'r9', regNo: '77', name: 'N', blob: new Blob(['p']), id: 'p1', now: 1_000_000 }))
+  await eng.runOnce()
+  assert.equal(db.get('p1').status, 'failed')
+  assert.ok(db.get('p1').blob, 'photo kept on the phone while unsynced')
+  net.up = true
+  await eng.runOnce({ force: true })
+  assert.equal(db.get('p1').status, 'synced')
+  assert.equal(db.get('p1').blob, null, 'freed once the server has it')
+  assert.deepEqual(net.profiles, [{ r: 'r9', path: profilePath('r9', 'p1') }])
+  assert.equal(profilePath('r9', 'p1'), 'profile/r9/p1.jpg')
 })

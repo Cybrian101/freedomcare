@@ -1,9 +1,12 @@
 "use client";
-// Browser-side helpers: image preprocessing, quality hint, /api/ocr call, tesseract fallback.
-import { extractAadhaarFromText } from "./verhoeff";
+// Browser-side helpers: image preparation, quality hint, the on-device reader (tesseract.js + QR) and the online fallback.
+import { extractAadhaarFromText, suggestAadhaarFixes, formatAadhaar } from "./verhoeff";
 import { extractUdid } from "@/lib/udid";
 import { parseUdidText } from "./udid-parse";
 import { parseAadhaarText } from "./aadhaar-parse";
+import { readAadhaarQr } from "./qr-read";
+import { binarizeBlob, canvasBlob, cropBlob, transformBlob } from "./image-ops";
+import type { AadhaarQr } from "./aadhaar-qr";
 import type { OcrKind, OcrResponse, OcrResult } from "./types";
 
 export interface QualityHint {
@@ -15,14 +18,23 @@ export interface QualityHint {
 }
 
 export interface PreparedImage {
+  /** copy kept with the registration: natural colours, up to 2600 px, high quality JPEG */
   blob: Blob;
+  /** copy for the on-device reader: up to 2600 px with the contrast gently stretched */
+  ocrBlob: Blob;
+  /** the photo exactly as taken (full size): the QR code is read from this, never from a shrunken copy */
+  original: Blob;
+  /** about 1600 px: preview on screen and the image sent to the online reader */
   dataUrl: string;
   width: number;
   height: number;
   quality: QualityHint;
 }
 
-const MAX_EDGE = 1600;
+// The reader needs letters roughly 30 px tall. A phone photo of a card is 3000-4000 px wide, so shrinking it to 1600 px
+// (as an earlier version did) left the digits too small to read. Keep the pixels for reading.
+const READ_EDGE = 2600;
+const SHOW_EDGE = 1600;
 
 async function loadBitmap(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
   if (typeof createImageBitmap === "function") {
@@ -39,7 +51,6 @@ async function loadBitmap(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
     await img.decode();
     return img; // browsers apply EXIF orientation to <img> by default
   } finally {
-    // keep URL alive until drawn: revoke after microtask by caller not needed for small usage
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 }
@@ -80,12 +91,12 @@ export function estimateQuality(data: ImageData): QualityHint {
   return { blurry, dark, glare, message };
 }
 
-/** Auto-orient (EXIF), optional extra rotation, downscale to ~1600px, mild contrast stretch, JPEG 0.85. */
+/** Auto-orient (EXIF), optional extra rotation, then make the stored copy, the reading copy and the preview. */
 export async function prepareImage(file: Blob, rotateQuarterTurns = 0): Promise<PreparedImage> {
   const src = await loadBitmap(file);
   const { w, h } = sizeOf(src);
   const turns = ((rotateQuarterTurns % 4) + 4) % 4;
-  const scale = Math.min(1, MAX_EDGE / Math.max(w, h));
+  const scale = Math.min(1, READ_EDGE / Math.max(w, h));
   const dw = Math.round(w * scale), dh = Math.round(h * scale);
   const [cw, ch] = turns % 2 ? [dh, dw] : [dw, dh];
 
@@ -101,7 +112,7 @@ export async function prepareImage(file: Blob, rotateQuarterTurns = 0): Promise<
   ctx.restore();
   if ("close" in src) src.close();
 
-  // quality estimate on a small copy (before contrast tweak)
+  // quality estimate on a small copy
   const q = document.createElement("canvas");
   const qs = Math.min(1, 640 / Math.max(cw, ch));
   q.width = Math.max(8, Math.round(cw * qs)); q.height = Math.max(8, Math.round(ch * qs));
@@ -109,7 +120,10 @@ export async function prepareImage(file: Blob, rotateQuarterTurns = 0): Promise<
   qctx.drawImage(canvas, 0, 0, q.width, q.height);
   const quality = estimateQuality(qctx.getImageData(0, 0, q.width, q.height));
 
-  // mild contrast: stretch between 1st and 99th luminance percentile (bounded so it stays gentle)
+  // 1) the copy that is kept: natural colours, high quality
+  const blob = await canvasBlob(canvas, 0.9);
+
+  // 2) the copy for reading: mild contrast stretch between the 1st and 99th luminance percentile (bounded, gentle)
   try {
     const img = ctx.getImageData(0, 0, cw, ch);
     const d = img.data;
@@ -131,13 +145,16 @@ export async function prepareImage(file: Blob, rotateQuarterTurns = 0): Promise<
       }
       ctx.putImageData(img, 0, 0);
     }
-  } catch { /* tainted/unsupported: skip */ }
+  } catch { /* unsupported: read the natural copy */ }
+  const ocrBlob = await canvasBlob(canvas, 0.93);
 
-  const blob = await new Promise<Blob>((res, rej) =>
-    canvas.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/jpeg", 0.85),
-  );
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-  return { blob, dataUrl, width: cw, height: ch, quality };
+  // 3) preview + online-reader copy
+  const ss = Math.min(1, SHOW_EDGE / Math.max(cw, ch));
+  const s = document.createElement("canvas");
+  s.width = Math.round(cw * ss); s.height = Math.round(ch * ss);
+  s.getContext("2d")!.drawImage(canvas, 0, 0, s.width, s.height);
+  const dataUrl = s.toDataURL("image/jpeg", 0.85);
+  return { blob, ocrBlob, original: file, dataUrl, width: cw, height: ch, quality };
 }
 
 export type OcrCallOutcome =
@@ -147,11 +164,14 @@ export type OcrCallOutcome =
 /** Calls /api/ocr. Network failure is reported as an error, never as "not found". */
 export async function requestOcr(kind: OcrKind, dataUrl: string): Promise<OcrCallOutcome> {
   try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 25_000); // a dead connection must not leave the screen waiting
     const res = await fetch("/api/ocr", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, image: dataUrl.split(",")[1], mimeType: "image/jpeg" }),
-    });
+      signal: ctl.signal,
+    }).finally(() => clearTimeout(timer));
     let body: OcrResponse | null = null;
     try { body = (await res.json()) as OcrResponse; } catch { /* not json (e.g. redirect to login) */ }
     if (body?.ok) return { ok: true, result: body.result };
@@ -165,31 +185,15 @@ export async function requestOcr(kind: OcrKind, dataUrl: string): Promise<OcrCal
   }
 }
 
-async function rotateBlob(src: Blob, quarterTurns: 1 | 3): Promise<Blob> {
-  const bmp = await createImageBitmap(src);
-  const canvas = document.createElement("canvas");
-  canvas.width = bmp.height;
-  canvas.height = bmp.width;
-  const ctx = canvas.getContext("2d")!;
-  ctx.translate(canvas.width / 2, canvas.height / 2);
-  ctx.rotate((quarterTurns * Math.PI) / 2);
-  ctx.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
-  bmp.close?.();
-  return new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("rotate failed"))), "image/jpeg", 0.9));
-}
-
 export interface LocalRead {
   raw: Record<string, { value: string | null; confidence: number } | number>;
   /** the key identifier (valid Aadhaar number / UDID or enrolment number) was found */
   found: boolean;
   rotatedTurns: 0 | 1 | 3;
+  /** plain-language notes for the person scanning (what was read from the QR, what was corrected, what to check) */
+  notes: string[];
 }
 
-/**
- * On-device OCR (tesseract.js). The worker, WASM core and English data are served from /tesseract (copied at build
- * time), so after the first load no network is needed. Cards are often photographed sideways, so it tries 0, 90 and
- * 270 degrees and stops as soon as the key number is found. Text is never logged or sent anywhere.
- */
 const workerOptions = (logger?: (m: { status: string; progress: number }) => void) => ({
   workerPath: "/tesseract/worker.min.js",
   corePath: "/tesseract",
@@ -213,8 +217,7 @@ export async function warmOcrEngine(): Promise<boolean> {
       const ctx = c.getContext("2d")!;
       ctx.fillStyle = "#fff";
       ctx.fillRect(0, 0, 64, 64);
-      const blob = await new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error("encode"))), "image/png"));
-      await worker.recognize(blob);
+      await worker.recognize(await canvasBlob(c, 0.9, "image/png"));
       return true;
     } finally {
       await worker.terminate();
@@ -224,44 +227,162 @@ export async function warmOcrEngine(): Promise<boolean> {
   }
 }
 
+type Worker = Awaited<ReturnType<(typeof import("tesseract.js"))["createWorker"]>>;
+type Box = { x0: number; y0: number; x1: number; y1: number };
+type Page = { data: { text: string; confidence: number; blocks?: { paragraphs?: { lines?: { text: string; bbox: Box }[] }[] }[] | null } };
+
+const lineBoxes = (page: Page) => {
+  const out: { text: string; bbox: Box }[] = [];
+  for (const b of page.data.blocks ?? []) for (const p of b.paragraphs ?? []) for (const l of p.lines ?? []) out.push({ text: l.text, bbox: l.bbox });
+  return out;
+};
+
+/**
+ * Cards are often photographed sideways. Find the right way up on a SMALL copy (fast), so the slow full-resolution read is
+ * done once, not three times. Returns the full-size image already turned the right way.
+ */
+async function turnUpright(worker: Worker, image: Blob, isHit: (text: string) => boolean): Promise<{ img: Blob; turns: 0 | 1 | 3; hit: boolean }> {
+  const small = await transformBlob(image, { maxEdge: 1100 }, 0.85);
+  let best: { score: number; turns: 0 | 1 | 3; hit: boolean } | null = null;
+  for (const turns of [0, 1, 3] as const) {
+    const probe = turns === 0 ? small : await transformBlob(small, { turns }, 0.85);
+    const { data } = await worker.recognize(probe);
+    const hit = isHit(data.text);
+    const score = (hit ? 1000 : 0) + data.confidence;
+    if (!best || score > best.score) best = { score, turns, hit };
+    if (hit) break;
+  }
+  const b = best!;
+  return { img: b.turns === 0 ? image : await transformBlob(image, { turns: b.turns }, 0.93), turns: b.turns, hit: b.hit };
+}
+
+async function digitsOnlyPass(worker: Worker, img: Blob, mode: "7" | "11"): Promise<string> {
+  await worker.setParameters({ tessedit_char_whitelist: "0123456789 ", tessedit_pageseg_mode: mode as never });
+  try {
+    return (await worker.recognize(img)).data.text;
+  } finally {
+    await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" as never });
+  }
+}
+
+/**
+ * On-device reader. The worker, WASM core and English data are served from /tesseract (copied at build time and stored by
+ * the service worker), so after the first load no network is needed. Strategy for an Aadhaar card, strongest evidence first:
+ *  1. the QR code on the card (name, date of birth, gender, address as data; last 4 digits of the number);
+ *  2. the printed text read at full resolution, after finding which way up the card is;
+ *  3. if the 12-digit number is still not valid: re-read just the line of digits, enlarged and digits-only, then a
+ *     black-and-white version for photos with shadows;
+ *  4. cross-checks: the number's last 4 digits must match the QR, and a single misread digit is corrected only when the
+ *     QR's last 4 digits confirm it.
+ * Everything found is shown to a person to confirm. Text and images are never logged or sent anywhere.
+ */
 export async function readLocal(
   kind: OcrKind,
   image: Blob,
   onProgress?: (p: number) => void,
+  /** the photo as taken, for the QR code (see prepareImage); falls back to `image` */
+  original?: Blob,
 ): Promise<LocalRead> {
   const { createWorker } = await import("tesseract.js");
-  let step = 0;
+  let base = 0, span = 0.25;
   const worker = await createWorker("eng", 1, workerOptions((m) => {
-    if (m.status === "recognizing text") onProgress?.((step + m.progress) / 3);
+    if (m.status === "recognizing text") onProgress?.(Math.min(0.99, base + m.progress * span));
   }));
+  const notes: string[] = [];
   try {
-    let best: { score: number; text: string; turns: 0 | 1 | 3; img: Blob } | null = null;
-    for (const turns of [0, 1, 3] as const) {
-      step = turns === 0 ? 0 : turns === 1 ? 1 : 2;
-      const img = turns === 0 ? image : await rotateBlob(image, turns);
-      const { data } = await worker.recognize(img);
-      const hit = kind === "aadhaar" ? parseAadhaarText(data.text).found : !!extractUdid(data.text);
-      const score = (hit ? 1000 : 0) + data.confidence;
-      if (!best || score > best.score) best = { score, text: data.text, turns, img };
-      if (hit) break;
+    if (kind === "udid") {
+      const up = await turnUpright(worker, image, (t) => !!extractUdid(t));
+      base = 0.3; span = 0.7;
+      const full = (await worker.recognize(up.img)) as Page;
+      return { ...parseUdidText(full.data.text), rotatedTurns: up.turns, notes };
     }
-    const b = best!;
-    if (kind === "aadhaar") {
-      const parsed = parseAadhaarText(b.text);
-      let { found } = parsed;
-      if (!parsed.number.valid) {
-        // second pass over digits only, to rescue the number; the other fields keep coming from the full-text pass
-        await worker.setParameters({ tessedit_char_whitelist: "0123456789 ", tessedit_pageseg_mode: "11" as never });
-        const alt = extractAadhaarFromText((await worker.recognize(b.img)).data.text);
-        if (alt.valid || !parsed.number.value) {
-          parsed.raw.aadhaar_no = { value: alt.value, confidence: alt.valid ? 0.7 : alt.value ? 0.2 : 0 };
-          found = found || alt.valid;
+
+    // 1) QR: starts now and runs alongside the text reading (the reader works in its own thread), so it adds no waiting
+    const qrPromise: Promise<AadhaarQr | null> = readAadhaarQr(original ?? image).catch(() => null);
+    base = 0; span = 0.05;
+
+    // 2) printed text at full resolution
+    base = 0.08; span = 0.17;
+    const up = await turnUpright(worker, image, (t) => parseAadhaarText(t).found);
+    base = 0.25; span = 0.45;
+    const full = (await worker.recognize(up.img, {}, { blocks: true })) as Page;
+    const parsed = parseAadhaarText(full.data.text);
+    let number = parsed.number;
+
+    // 3) rescue the number
+    if (!number.valid) {
+      base = 0.7; span = 0.12;
+      const candidates: string[] = [];
+      const digitLines = lineBoxes(full).filter((l) => l.text.replace(/\D/g, "").length >= 8);
+      for (const l of digitLines.slice(0, 3)) {
+        const crop = await cropBlob(up.img, l.bbox, { pad: 14, targetH: 110 });
+        candidates.push(await digitsOnlyPass(worker, crop, "7"));
+      }
+      candidates.push(await digitsOnlyPass(worker, up.img, "11"));
+      let alt = extractAadhaarFromText(candidates.join("\n"));
+      if (!alt.valid) {
+        base = 0.85; span = 0.14;
+        const bw = await binarizeBlob(up.img);
+        const bwPage = (await worker.recognize(bw, {}, { blocks: true })) as Page;
+        const bwParsed = parseAadhaarText(bwPage.data.text);
+        alt = bwParsed.number.valid ? bwParsed.number : alt;
+        if (!alt.valid) {
+          for (const l of lineBoxes(bwPage).filter((x) => x.text.replace(/\D/g, "").length >= 8).slice(0, 2)) {
+            const t = await digitsOnlyPass(worker, await cropBlob(bw, l.bbox, { pad: 14, targetH: 110 }), "7");
+            const e = extractAadhaarFromText(t);
+            if (e.valid) { alt = e; break; }
+          }
         }
       }
-      return { found, rotatedTurns: b.turns, raw: parsed.raw };
+      if (alt.valid || !number.value) number = alt;
     }
-    return { ...parseUdidText(b.text), rotatedTurns: b.turns };
+
+    // 4) cross-checks with the QR
+    const qr = await qrPromise;
+    if (qr?.aadhaar_no && !number.valid) {
+      number = { value: qr.aadhaar_no, valid: true }; // old XML QR carries the whole number
+      notes.push("Aadhaar number taken from the QR code on the card.");
+    }
+    let numberConf = number.valid ? 0.7 : number.value ? 0.2 : 0;
+    if (qr?.last4 && number.value) {
+      if (number.valid && number.value.endsWith(qr.last4)) {
+        numberConf = 0.95;
+        notes.push("The number matches the last 4 digits in the card's QR code.");
+      } else if (number.valid) {
+        numberConf = 0.3;
+        notes.push(`The number read does NOT end in ${qr.last4}, the last 4 digits in the card's QR code. Compare every digit with the card.`);
+      } else {
+        const fixes = suggestAadhaarFixes(number.value).filter((f) => f.digits.endsWith(qr.last4!));
+        if (fixes.length === 1) {
+          number = { value: fixes[0].digits, valid: true };
+          numberConf = 0.6;
+          notes.push(`Digit ${fixes[0].position} was corrected (${fixes[0].from} to ${fixes[0].to}) because the result passes the Aadhaar check and matches the QR code. Please confirm it against the card.`);
+        }
+      }
+    }
+
+    const raw: LocalRead["raw"] = { ...parsed.raw, aadhaar_no: { value: number.value, confidence: numberConf } };
+    if (qr) {
+      const set = (k: string, v: string | null, c = 0.95) => { if (v) raw[k] = { value: v, confidence: c }; };
+      set("name", qr.name);
+      set("dob", qr.dob ? qr.dob.split("-").reverse().join("/") : null);
+      if (qr.dob) raw.yob = { value: null, confidence: 0 };
+      else set("yob", qr.yob, 0.9);
+      set("gender", qr.gender);
+      set("care_of", qr.care_of, 0.9);
+      set("address", qr.address, 0.9);
+      set("pincode", qr.pincode);
+      set("district", qr.district, 0.9);
+      set("state", qr.state, 0.9);
+      notes.unshift("Name, date of birth and address were read from the QR code on the card (more reliable than the printed text).");
+    } else {
+      notes.unshift("No QR code could be read, so the details come from the printed text. Check the name and date of birth carefully.");
+    }
+    if (!number.valid) notes.push(`The 12-digit number could not be read reliably${number.value ? ` (best guess ${formatAadhaar(number.value)})` : ""}. Type it from the card.`);
+
+    return { raw, found: number.valid || (!number.value && parsed.found), rotatedTurns: up.turns, notes };
   } finally {
     await worker.terminate();
   }
 }
+

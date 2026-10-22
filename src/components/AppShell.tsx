@@ -113,7 +113,7 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 w-full max-w-3xl mx-auto px-4 py-5 pb-28 lg:pb-10 lg:px-8 animate-fade-up">{children}</main>
+        <main className="flex-1 w-full min-w-0 px-4 py-5 pb-28 sm:px-6 lg:px-10 lg:py-8 lg:pb-10 animate-fade-up">{children}</main>
 
         {/* Mobile bottom nav */}
         <nav aria-label="Main" className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-line pb-safe">

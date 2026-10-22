@@ -104,3 +104,21 @@ test("invalid checksum number is returned but not 'found'", () => {
   assert.equal(r.found, false);
   assert.equal(v(r, "aadhaar_no"), bad);
 });
+
+test("name: noisy junk lines above the DOB do not beat the real name line", () => {
+  const r = parseAadhaarText(`Government of India\neo en\nRamesh Kumar Selvam\nSa\nDOB: 14/03/1982 REGR\nMale\n${GROUPED}`);
+  assert.equal(v(r, "name"), "Ramesh Kumar Selvam");
+  const r2 = parseAadhaarText(`Government of India\nRamesh Kumar Selvam\npri ae\nDOB: 14/03/1982\nMale\n${GROUPED}`);
+  assert.equal(v(r2, "name"), "Ramesh Kumar Selvam");
+});
+
+test("name: junk capitals glued after a mixed-case name are dropped, initials and all-caps names are kept", () => {
+  const f = (n) => v(parseAadhaarText(`Government of India
+${n}
+DOB: 14/03/1982
+Male
+${GROUPED}`), "name");
+  assert.equal(f("Sundari Devi Raman ROR BRE"), "Sundari Devi Raman");
+  assert.equal(f("Mohamed Ibrahim S"), "Mohamed Ibrahim S");
+  assert.equal(f("RAMESH KUMAR"), "RAMESH KUMAR");
+});
