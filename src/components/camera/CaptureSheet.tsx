@@ -1,17 +1,18 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { compressImage, type PhotoKind } from "./compress";
-import { cn } from "@/components/ui/cn";
 
 export interface CaptureSubject {
   name: string;
   regNo?: string | null;
+  /** a second line under the name, e.g. the Reg. Nos of everyone in a group photo */
+  detail?: string;
 }
 
 /**
- * Photo capture for a specific person. Two kinds:
- *  - "handover": the aid being handed over (rear camera, natural framing);
- *  - "profile":  the person's face (front camera, 3:4 portrait with a face guide).
+ * Photo capture for a specific person (or a wheelchair group). Rear camera only, for every photo. Two kinds:
+ *  - "handover": the aid being handed over (natural framing);
+ *  - "profile":  the person's face (3:4 portrait with a face guide).
  * The person's name and Reg. No. are shown the whole time (and again on the preview) so a photo can never be taken for
  * the wrong person unnoticed. The result is a high-quality JPEG (see compress.ts), never a visibly degraded one.
  *
@@ -24,6 +25,8 @@ export function CaptureSheet({
   onSubmit,
   initialPhoto,
   onPhotoReady,
+  heading,
+  saveLabel = "Save photo",
 }: {
   kind: PhotoKind;
   subject: CaptureSubject;
@@ -33,12 +36,14 @@ export function CaptureSheet({
   initialPhoto?: Blob | null;
   /** called whenever the previewed photo changes (null after retake) so the caller can keep it safe */
   onPhotoReady?: (photo: Blob | null) => void;
+  /** small heading above the name (default: "Handover photo for" / "Profile photo for") */
+  heading?: string;
+  saveLabel?: string;
 }) {
   const profile = kind === "profile";
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [facing, setFacing] = useState<"user" | "environment">(profile ? "user" : "environment");
   const [live, setLive] = useState(false);
   const [ratio, setRatio] = useState(profile ? 3 / 4 : 4 / 3); // width / height of the viewfinder
   const [liveErr, setLiveErr] = useState<string | null>(null);
@@ -54,7 +59,7 @@ export function CaptureSheet({
   }, []);
 
   const start = useCallback(
-    async (mode: "user" | "environment") => {
+    async () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -64,7 +69,7 @@ export function CaptureSheet({
       }
       try {
         const s = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: mode }, width: { ideal: 1920 }, height: { ideal: 1920 } },
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1920 } }, // rear camera only
           audio: false,
         });
         streamRef.current = s;
@@ -82,7 +87,7 @@ export function CaptureSheet({
   useEffect(() => {
     let dead = false;
     if (!photo) {
-      void Promise.resolve().then(() => start(facing)).then(() => { if (dead) stop(); });
+      void Promise.resolve().then(() => start()).then(() => { if (dead) stop(); });
     }
     return () => { dead = true; stop(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -134,7 +139,7 @@ export function CaptureSheet({
     const c = document.createElement("canvas");
     c.width = sw;
     c.height = sh;
-    c.getContext("2d")!.drawImage(v, sx, sy, sw, sh, 0, 0, sw, sh); // not mirrored: the saved photo is the true image
+    c.getContext("2d")!.drawImage(v, sx, sy, sw, sh, 0, 0, sw, sh);
     const blob = await new Promise<Blob | null>((r) => c.toBlob(r, "image/jpeg", 0.95));
     if (blob) await accept(blob);
   }
@@ -155,18 +160,11 @@ export function CaptureSheet({
   function retake() {
     setPhoto(null);
     setErr(null);
-    void start(facing);
-  }
-
-  function flip() {
-    const next = facing === "user" ? "environment" : "user";
-    setFacing(next);
-    void start(next);
+    void start();
   }
 
   const cancel = () => { stop(); onCancel(); };
   const boxRatio = photo ? photoRatio : ratio;
-  const mirror = live && !photo && facing === "user";
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-ink/80 backdrop-blur-sm sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label={profile ? "Take profile photo" : "Take handover photo"}>
@@ -174,8 +172,9 @@ export function CaptureSheet({
         {/* who this photo is for: always visible */}
         <header className="flex items-center gap-3 border-b border-white/10 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold uppercase tracking-wider text-teal-300">{profile ? "Profile photo for" : "Handover photo for"}</p>
+            <p className="text-xs font-bold uppercase tracking-wider text-teal-300">{heading ?? (profile ? "Profile photo for" : "Handover photo for")}</p>
             <p className="truncate text-lg font-extrabold">{subject.name}</p>
+            {subject.detail && <p className="line-clamp-2 text-sm font-semibold text-white/80">{subject.detail}</p>}
           </div>
           {subject.regNo ? (
             <span className="shrink-0 rounded-xl bg-white px-3 py-1.5 text-lg font-extrabold text-ink" aria-label={`Reg. No. ${subject.regNo}`}>{subject.regNo}</span>
@@ -204,7 +203,7 @@ export function CaptureSheet({
                       const v = e.currentTarget;
                       if (!profile && v.videoWidth && v.videoHeight) setRatio(v.videoWidth / v.videoHeight);
                     }}
-                    className={cn("h-full w-full object-cover", mirror && "-scale-x-100")}
+                    className="h-full w-full object-cover"
                   />
                   {profile && (
                     <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 300 400" preserveAspectRatio="none" aria-hidden>
@@ -231,9 +230,9 @@ export function CaptureSheet({
             <div className="space-y-2">
               <p className="text-center text-sm text-white/80">Is this <b className="text-white">{subject.name}</b>{subject.regNo ? ` (Reg. No. ${subject.regNo})` : ""}? Check the photo is clear.</p>
               <div className="flex gap-3">
-                <button disabled={busy} onClick={retake} className="min-h-14 flex-1 rounded-2xl bg-white/15 text-base font-bold active:bg-white/25 disabled:opacity-50">Retake</button>
-                <button disabled={busy} onClick={submit} className="min-h-14 flex-[2] rounded-2xl bg-teal-400 text-base font-extrabold text-ink active:bg-teal-300 disabled:opacity-50">
-                  {busy ? "Saving..." : "Save photo"}
+                <button disabled={busy} onClick={retake} className="min-h-16 flex-1 rounded-2xl bg-white/15 text-lg font-bold active:bg-white/25 disabled:opacity-50">Retake</button>
+                <button autoFocus disabled={busy} onClick={submit} className="min-h-16 flex-[2] rounded-2xl bg-teal-400 text-lg font-extrabold text-ink active:bg-teal-300 disabled:opacity-50">
+                  {busy ? "Saving..." : saveLabel}
                 </button>
               </div>
             </div>
@@ -248,9 +247,7 @@ export function CaptureSheet({
                 aria-label="Take photo"
                 className="size-[4.5rem] shrink-0 rounded-full border-[5px] border-white bg-white/90 shadow-lg active:scale-95 active:bg-white disabled:opacity-40"
               />
-              <button disabled={busy} onClick={flip} className="min-h-14 flex-1 rounded-2xl bg-white/15 px-2 text-sm font-bold active:bg-white/25">
-                {facing === "user" ? "Rear camera" : "Front camera"}
-              </button>
+              <span className="flex-1" aria-hidden />
             </div>
           )}
         </footer>
@@ -259,7 +256,7 @@ export function CaptureSheet({
           ref={fileRef}
           type="file"
           accept="image/*"
-          capture={profile ? "user" : "environment"}
+          capture="environment"
           className="hidden"
           onChange={(e) => {
             const f = e.target.files?.[0];
