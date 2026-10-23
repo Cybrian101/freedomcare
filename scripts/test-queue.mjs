@@ -10,7 +10,7 @@ const out = ts.transpileModule(src, { compilerOptions: { module: 'ESNext', targe
 mkdirSync('.tmp-test', { recursive: true })
 writeFileSync('.tmp-test/queue-core.mjs', out)
 const core = await import(pathToFileURL(process.cwd() + '/.tmp-test/queue-core.mjs').href)
-const { SyncEngine, QueueError, newItem, newAttendanceItem, newLinkItem, newProfileItem, profilePath, newRegistrationItem, photoPath, backoffMs, stripCardImages } = core
+const { SyncEngine, QueueError, newItem, newAttendanceItem, newLinkItem, newProfileItem, profilePath, newRegistrationItem, photoPath, backoffMs, stripCardImages, newGroupHandoverItem, pendingHandover } = core
 
 function mk() {
   const db = new Map()
@@ -52,11 +52,14 @@ function mk() {
       if (!net.up) throw new QueueError('network', 'x')
       net.uploads++
     },
-    complete: async (_r, _p, sub) => {
+    complete: async (r, p, sub) => {
       if (!net.up) throw new QueueError('network', 'x')
       if (net.completeErr) throw net.completeErr
+      if (net.refuse?.has(r)) throw new QueueError('permanent', 'beneficiary not found')
+      if (net.downAfter != null && net.completes >= net.downAfter) throw new QueueError('network', 'x')
       net.completes++
-      return { serverSubmissionId: net.serverSub ?? sub, distributedAt: 'now' }
+      net.completed = [...(net.completed ?? []), { r, p, sub }]
+      return { serverSubmissionId: net.serverOwner?.[r] ?? net.serverSub ?? sub, distributedAt: 'now' }
     },
   }
   let t = 1_000_000
@@ -308,4 +311,61 @@ test('profile photo: uploads under the person id, attaches once, survives going 
   assert.equal(db.get('p1').blob, null, 'freed once the server has it')
   assert.deepEqual(net.profiles, [{ r: 'r9', path: profilePath('r9', 'p1'), thumb: 'QUJD' }], 'the thumbnail is sent with the photo so other phones can show it')
   assert.equal(profilePath('r9', 'p1'), 'profile/r9/p1.jpg')
+})
+
+const members = (n) => Array.from({ length: n }, (_, k) => ({ rosterId: `w${k}`, regNo: String(500 + k), name: `P${k}`, submissionId: `sub${k}` }))
+
+test('group handover: one upload, one record per member, all with the same photo', async () => {
+  const { db, net, eng } = mk()
+  await eng.enqueue(newGroupHandoverItem({ id: 'g1', members: members(4), blob: new Blob(['g']), now: 1_000_000 }))
+  assert.ok(pendingHandover([db.get('g1')], 'w2'), 'members show as waiting while unsent')
+  await eng.runOnce()
+  const g = db.get('g1')
+  assert.equal(g.status, 'synced')
+  assert.equal(g.blob, null)
+  assert.equal(net.uploads, 1)
+  assert.deepEqual(net.completed.map((c) => c.r), ['w0', 'w1', 'w2', 'w3'])
+  assert.ok(net.completed.every((c) => c.p === photoPath('g1')), 'every member points at the one group photo')
+  assert.deepEqual(net.completed.map((c) => c.sub), ['sub0', 'sub1', 'sub2', 'sub3'])
+  assert.equal(pendingHandover([g], 'w2'), undefined)
+})
+
+test('group handover: connection lost half-way resumes without repeating anyone', async () => {
+  const { db, net, eng } = mk()
+  net.downAfter = 2
+  await eng.enqueue(newGroupHandoverItem({ id: 'g2', members: members(5), blob: new Blob(['g']), now: 1_000_000 }))
+  await eng.runOnce()
+  assert.equal(db.get('g2').status, 'failed')
+  assert.deepEqual(db.get('g2').payload.done, ['w0', 'w1'])
+  net.downAfter = null
+  await eng.runOnce({ force: true })
+  assert.equal(db.get('g2').status, 'synced')
+  assert.equal(net.uploads, 1, 'photo not uploaded twice')
+  assert.deepEqual(net.completed.map((c) => c.r), ['w0', 'w1', 'w2', 'w3', 'w4'])
+})
+
+test('group handover: one refused member does not hold back the others', async () => {
+  const { db, net, eng } = mk()
+  net.refuse = new Set(['w1'])
+  await eng.enqueue(newGroupHandoverItem({ id: 'g3', members: members(3), blob: new Blob(['g']), now: 1_000_000 }))
+  await eng.runOnce()
+  const g = db.get('g3')
+  assert.equal(g.status, 'rejected')
+  assert.match(g.lastError, /Saved for 2 of 3.*501/)
+  assert.ok(g.blob, 'photo kept for a retry')
+  assert.deepEqual(net.completed.map((c) => c.r), ['w0', 'w2'])
+  net.refuse = null
+  await eng.retry('g3')
+  await eng.runOnce()
+  assert.equal(db.get('g3').status, 'synced')
+  assert.deepEqual(net.completed.map((c) => c.r), ['w0', 'w2', 'w1'])
+})
+
+test('group handover: a member already done on another phone resolves as duplicate', async () => {
+  const { db, net, eng } = mk()
+  net.serverOwner = { w0: 'other-phone' }
+  await eng.enqueue(newGroupHandoverItem({ id: 'g4', members: members(2), blob: new Blob(['g']), now: 1_000_000 }))
+  await eng.runOnce()
+  assert.equal(db.get('g4').status, 'synced')
+  assert.equal(db.get('g4').resolution, 'duplicate')
 })

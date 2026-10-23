@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useSync } from "@/components/SyncProvider";
 import { OfflineReadiness } from "@/components/OfflineReadiness";
-import { kindOf, type QueueItem, type QueueKind } from "@/lib/queue-core";
+import { groupMembers, kindOf, type QueueItem, type QueueKind } from "@/lib/queue-core";
 import { signOut } from "@/app/(auth)/login/actions";
 import { SignOutForm } from "@/components/SignOutForm";
 
@@ -18,6 +18,10 @@ const KIND: Record<QueueKind, { badge: string; tone: string; line: (i: QueueItem
   },
   link: { badge: "Details added", tone: "bg-amber-100 text-amber-900", line: () => "Aadhaar and date of birth added to the existing record", plural: "details added" },
   profile: { badge: "Profile photo", tone: "bg-violet-100 text-violet-900", line: () => "Profile photo taken for this person", plural: "profile photo" },
+  group_handover: {
+    badge: "Group handover", tone: "bg-emerald-100 text-emerald-900", plural: "group handover",
+    line: (i) => `One photo for ${groupMembers(i).length} wheelchair people`,
+  },
 };
 
 /** One confirmed action for THIS login, from the server (works across phones). */
@@ -65,7 +69,7 @@ function Thumb({ item }: { item: QueueItem }) {
   }, [u]);
   if (!u) return null;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={u} alt={kindOf(item) === "handover" ? "Handover photo" : "Profile photo"} className="h-16 w-16 shrink-0 rounded-lg object-cover" />;
+  return <img src={u} alt={kindOf(item) === "profile" || kindOf(item) === "registration" ? "Profile photo" : "Handover photo"} className="h-16 w-16 shrink-0 rounded-lg object-cover" />;
 }
 
 const who = (i: QueueItem) => i.ownerName ?? i.ownerEmail ?? "unknown";
@@ -73,7 +77,7 @@ const clock = (t: number) => new Date(t).toLocaleTimeString("en-IN", { timeStyle
 
 function Person({ i }: { i: QueueItem }) {
   const label = `${i.name ?? "Beneficiary"}${i.regNo ? ` · Reg. No. ${i.regNo}` : ""}`;
-  return kindOf(i) === "registration"
+  return kindOf(i) === "registration" || kindOf(i) === "group_handover"
     ? <p className="truncate font-semibold text-slate-900">{label}</p>
     : <Link href={`/distribution/profile?id=${i.rosterId}`} className="block truncate font-semibold text-slate-900">{label}</Link>;
 }

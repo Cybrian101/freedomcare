@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getById } from "@/lib/roster";
 import { withTimeout } from "@/lib/net";
 import { asRosterStatus, deleteDraft, getLocal, loadDraft, putLocalFromServer, saveDraft, syncThumbs, type LocalBeneficiary } from "@/lib/local-db";
-import { kindOf, submitHandover } from "@/lib/offline-queue";
+import { kindOf, pendingHandover, submitHandover } from "@/lib/offline-queue";
 import { useSync } from "@/components/SyncProvider";
 import { CaptureSheet } from "@/components/camera/CaptureSheet";
 import { Avatar, usePersonThumb } from "./Avatar";
@@ -33,7 +33,7 @@ export function BeneficiaryProfile({ id }: { id: string }) {
   const thumbUrl = usePersonThumb(id, photoKey);
 
   const mine = useMemo(() => items.filter((i) => i.rosterId === id).sort((a, b) => b.createdAt - a.createdAt), [items, id]);
-  const openHandover = mine.find((i) => kindOf(i) === "handover" && i.status !== "synced");
+  const openHandover = pendingHandover(items, id); // a single or a wheelchair-group handover
   const openAttend = mine.find((i) => kindOf(i) === "attendance" && i.status !== "synced");
   const lastHandover = mine.find((i) => kindOf(i) === "handover" && i.status === "synced");
   // changes whenever the engine confirms something for this person => re-read the server row

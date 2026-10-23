@@ -10,13 +10,23 @@
 
 export type QueueStatus = 'queued' | 'syncing' | 'failed' | 'rejected' | 'synced'
 /** What the operation does. Items written before kinds existed have no `kind` and are handovers. */
-export type QueueKind = 'handover' | 'attendance' | 'registration' | 'link' | 'profile'
+export type QueueKind = 'handover' | 'attendance' | 'registration' | 'link' | 'profile' | 'group_handover'
+
+/** One person in a group handover (wheelchairs handed over together, one photo for all). Each has its own submission id
+ *  because the server keeps one per person. */
+export interface GroupMember {
+  rosterId: string
+  regNo: string | null
+  name?: string
+  submissionId: string
+}
 
 export interface QueueItem {
   id: string // == submissionId (also the IndexedDB key); for registrations == the new beneficiary uuid
   kind?: QueueKind
   /** registration: the beneficiaries row to insert (id is client-generated => insert is idempotent).
-   *  attendance: { dob } saved only if the record has none. link: { aadhaar_no, dob, yob } added to a listed person. */
+   *  attendance: { dob } saved only if the record has none. link: { aadhaar_no, dob, yob } added to a listed person.
+   *  group_handover: { members: GroupMember[], done: rosterId[] } (done = confirmed by the server, skipped on retry). */
   payload?: Record<string, unknown>
   /** registration only: the profile photo, uploaded after the row exists. Card images are never kept (older items may
    *  still hold them; the engine never uploads them and stripCardImages removes them). */
@@ -84,6 +94,17 @@ export interface QueueRemote {
 }
 
 export const kindOf = (i: Pick<QueueItem, 'kind'>): QueueKind => i.kind ?? 'handover'
+
+export const groupMembers = (i: QueueItem): GroupMember[] =>
+  kindOf(i) === 'group_handover' ? ((i.payload?.members as GroupMember[] | undefined) ?? []) : []
+
+/** The handover (single or group) for this person that is saved on the phone but not yet confirmed by the server. */
+export function pendingHandover(items: QueueItem[], rosterId: string): QueueItem | undefined {
+  return items
+    .filter((i) => i.status !== 'synced')
+    .filter((i) => (kindOf(i) === 'handover' && i.rosterId === rosterId) || groupMembers(i).some((m) => m.rosterId === rosterId))
+    .sort((a, b) => b.createdAt - a.createdAt)[0]
+}
 
 /** Older app versions kept the photo of the Aadhaar / UDID card in the queue. Returns the item without it (or null when
  *  there was nothing to remove), so stored items can be cleaned up once on start. */
@@ -165,6 +186,18 @@ export function newRegistrationItem(p: {
   return {
     id: p.id, kind: 'registration', payload: p.payload, docs: p.docs, docsUploaded: [],
     rosterId: p.id, regNo: null, name: p.name, blob: null,
+    submissionId: p.id, createdAt: now, status: 'queued', attempts: 0, lastError: null, nextAttemptAt: now,
+  }
+}
+
+/** One photo for several people (wheelchair group). The photo is uploaded once and recorded for every member. */
+export function newGroupHandoverItem(p: { id: string; members: GroupMember[]; blob: Blob; now?: number }): QueueItem {
+  const now = p.now ?? Date.now()
+  const first = p.members[0]
+  return {
+    id: p.id, kind: 'group_handover', rosterId: first?.rosterId ?? p.id, regNo: null,
+    name: `Group of ${p.members.length}: ${p.members.map((m) => m.regNo ?? m.name ?? '?').join(', ')}`,
+    blob: p.blob, payload: { members: p.members, done: [] },
     submissionId: p.id, createdAt: now, status: 'queued', attempts: 0, lastError: null, nextAttemptAt: now,
   }
 }
@@ -347,6 +380,31 @@ export class SyncEngine {
         await this.remote.upload(path, cur.blob) // repeat-safe
         cur = { ...cur, uploaded: true }
         await this.store.put(cur)
+      }
+      if (kind === 'group_handover') {
+        // the same photo is recorded for every member; progress is saved after each one so a retry skips them
+        const members = groupMembers(cur)
+        if (!members.length) throw new QueueError('permanent', 'Group details missing on this device')
+        const done = new Set((cur.payload?.done as string[] | undefined) ?? [])
+        const refused: string[] = []
+        let dup = false
+        for (const m of members) {
+          if (done.has(m.rosterId)) continue
+          try {
+            const r = await this.remote.complete(m.rosterId, path, m.submissionId)
+            if (r.serverSubmissionId && r.serverSubmissionId !== m.submissionId) dup = true
+          } catch (e) {
+            // one person refused (e.g. not on the list) must not hold back the others
+            if (e instanceof QueueError && e.kind === 'permanent') { refused.push(`${m.regNo ?? m.name ?? m.rosterId} (${e.message})`); continue }
+            throw e
+          }
+          done.add(m.rosterId)
+          cur = { ...cur, payload: { ...cur.payload, done: [...done] } }
+          await this.store.put(cur)
+        }
+        if (refused.length) throw new QueueError('permanent', `Saved for ${done.size} of ${members.length}. Not saved for: ${refused.join(', ')}`)
+        await this.store.put({ ...cur, status: 'synced', blob: null, lastError: null, syncedAt: this.clock(), resolution: dup ? 'duplicate' : 'created' })
+        return true
       }
       const res = await this.remote.complete(cur.rosterId, path, cur.submissionId)
       const dup = !!res.serverSubmissionId && res.serverSubmissionId !== cur.submissionId

@@ -5,7 +5,7 @@ import { Page, PageHeader } from "@/components/ui";
 export default function DistributionPage() {
   return (
     <Page>
-      <PageHeader title="Distribution" subtitle="Call out the token number, find the person, photograph the handover and save" />
+      <PageHeader title="Distribution" subtitle="Type the token number, tap the camera, save." />
       <DatasetPanel compact />
       <DeskSearch />
     </Page>

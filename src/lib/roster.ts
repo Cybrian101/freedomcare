@@ -1,7 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { RosterRow } from "./types";
+import type { Appliance, RosterRow } from "./types";
 
 const T = "camp_roster";
+
+/** Wheelchair-type aids (Wheel chair, Commode / Hi-back wheel chair, CP chair): the only ones handed over as a group. */
+export const isWheelchair = (appliances: Appliance[]) => appliances.some((a) => /wheel\s*chair|cp\s*chair/i.test(a.name));
 
 function must<R>(r: { data: R; error: { message: string } | null }): R {
   if (r.error) throw new Error(r.error.message);

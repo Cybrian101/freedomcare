@@ -11,6 +11,7 @@ import {
   SyncEngine,
   newItem,
   newAttendanceItem,
+  newGroupHandoverItem,
   newLinkItem,
   newProfileItem,
   newRegistrationItem,
@@ -158,6 +159,20 @@ export async function submitHandover(p: {
   const item = stamp(newItem({ ...p, submissionId: p.submissionId ?? crypto.randomUUID() }));
   const eng = getEngine();
   await eng.enqueue(item); // "Saved on this device"
+  void eng.runOnce();
+  return item;
+}
+
+/** Wheelchair group: one photo saved for every member. Persist first, sync without awaiting. */
+export async function submitGroupHandover(p: {
+  members: { rosterId: string; regNo: string | null; name?: string }[];
+  blob: Blob;
+}): Promise<QueueItem> {
+  const id = crypto.randomUUID();
+  const members = p.members.map((m) => ({ ...m, submissionId: crypto.randomUUID() }));
+  const item = stamp(newGroupHandoverItem({ id, members, blob: p.blob }));
+  const eng = getEngine();
+  await eng.enqueue(item);
   void eng.runOnce();
   return item;
 }
