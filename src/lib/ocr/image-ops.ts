@@ -80,28 +80,6 @@ export async function cropBlob(
 }
 
 /**
- * One part of the photo (given as fractions of its width and height), enlarged so small detail such as the squares of a
- * QR code gets enough pixels: up to `zoom` times, never past `maxEdge` on the longest side.
- */
-export async function regionCanvas(
-  blob: Blob,
-  r: { x0: number; y0: number; x1: number; y1: number },
-  opts: { zoom?: number; maxEdge?: number } = {},
-): Promise<HTMLCanvasElement> {
-  const src = await toCanvas(blob);
-  const x0 = Math.round(src.width * r.x0), y0 = Math.round(src.height * r.y0);
-  const w = Math.max(1, Math.round(src.width * r.x1) - x0), h = Math.max(1, Math.round(src.height * r.y1) - y0);
-  const k = Math.min(opts.zoom ?? 2, (opts.maxEdge ?? 3200) / Math.max(w, h));
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.round(w * k));
-  c.height = Math.max(1, Math.round(h * k));
-  const ctx = c.getContext("2d", { willReadFrequently: true })!;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(src, x0, y0, w, h, 0, 0, c.width, c.height);
-  return c;
-}
-
-/**
  * Black-and-white version for hard photos (uneven light, shadows, glare). Each pixel is compared with the average of its
  * neighbourhood (integral image), so a shadow across half the card does not wipe out the letters the way one global
  * threshold would.

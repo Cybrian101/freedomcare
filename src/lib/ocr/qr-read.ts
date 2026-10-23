@@ -3,7 +3,7 @@
 // Android: fast and strong), otherwise ZXing (the reference QR decoder, compiled to WebAssembly and served from this site,
 // so it works offline). Nothing leaves the phone.
 import { parseAadhaarQr, type AadhaarQr } from "./aadhaar-qr";
-import { binarizeBlob, regionCanvas, toCanvas } from "./image-ops";
+import { binarizeBlob, toCanvas } from "./image-ops";
 
 interface DetectorLike { detect(image: ImageBitmapSource): Promise<{ rawValue?: string }[]> }
 type DetectorCtor = new (o: { formats: string[] }) => DetectorLike;
@@ -50,19 +50,12 @@ async function scan(c: HTMLCanvasElement): Promise<string | null> {
 /**
  * The card's QR is dense (about 140-160 squares across), so it needs roughly 4+ pixels per square: it is read from the
  * ORIGINAL full-size photo, never from the shrunken copy used for the printed text. Attempts, cheapest first: the photo as
- * taken, then a black-and-white version that survives shadows and glare, then each quarter of the photo enlarged (when
- * the card is small in the photo its QR squares are too few pixels to read; which quarter holds the QR depends on how
- * the card was held, so all four are tried).
+ * taken, then a black-and-white version that survives shadows and glare.
  */
 async function viaZxing(blob: Blob): Promise<string[]> {
-  const quarters = [
-    { x0: 0.4, y0: 0, x1: 1, y1: 0.6 }, { x0: 0.4, y0: 0.4, x1: 1, y1: 1 }, // the QR is on the right of an upright card
-    { x0: 0, y0: 0, x1: 0.6, y1: 0.6 }, { x0: 0, y0: 0.4, x1: 0.6, y1: 1 },
-  ];
   const tries: (() => Promise<HTMLCanvasElement>)[] = [
     () => toCanvas(blob, { maxEdge: 4096 }),
     async () => toCanvas(await binarizeBlob(blob, 3200)),
-    ...quarters.map((q) => () => regionCanvas(blob, q, { zoom: 2, maxEdge: 3200 })),
   ];
   for (const make of tries) {
     const text = await scan(await make());
