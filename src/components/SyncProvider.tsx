@@ -3,7 +3,7 @@ import Link from "next/link";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { resetRole } from "@/lib/role";
-import { getEngine, listQueue, requestPersistence, setOwner, type QueueItem, type StorageHealth } from "@/lib/offline-queue";
+import { getEngine, listQueue, removeStoredCardImages, requestPersistence, setOwner, type QueueItem, type StorageHealth } from "@/lib/offline-queue";
 
 interface SyncCtx {
   items: QueueItem[];
@@ -81,6 +81,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     void sb.auth.getSession().then(({ data }) => applyUser(data.session?.user ?? null));
     const { data: authSub } = sb.auth.onAuthStateChange((_e, session) => applyUser(session?.user ?? null));
     (async () => {
+      await removeStoredCardImages();
       await eng.recover();
       await refresh();
       run();

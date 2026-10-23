@@ -1,5 +1,6 @@
 "use client";
 // Browser-side helpers: image preparation, quality hint, the on-device reader (tesseract.js + QR) and the online fallback.
+// Card photos are read here and dropped: they are never stored (not on the phone, not on the server).
 import { extractAadhaarFromText, suggestAadhaarFixes, formatAadhaar } from "./verhoeff";
 import { extractUdid } from "@/lib/udid";
 import { parseUdidText } from "./udid-parse";
@@ -17,9 +18,13 @@ export interface QualityHint {
   message: string | null;
 }
 
+/**
+ * The online reader (/api/ocr, Gemini) sends the card image to Google. Switched OFF: cards are read on the phone only.
+ * Turning it on again is a decision for the camp organisers, not a code change to make casually.
+ */
+export const ONLINE_READER = false;
+
 export interface PreparedImage {
-  /** copy kept with the registration: natural colours, up to 2600 px, high quality JPEG */
-  blob: Blob;
   /** copy for the on-device reader: up to 2600 px with the contrast gently stretched */
   ocrBlob: Blob;
   /** the photo exactly as taken (full size): the QR code is read from this, never from a shrunken copy */
@@ -91,7 +96,7 @@ export function estimateQuality(data: ImageData): QualityHint {
   return { blurry, dark, glare, message };
 }
 
-/** Auto-orient (EXIF), optional extra rotation, then make the stored copy, the reading copy and the preview. */
+/** Auto-orient (EXIF), optional extra rotation, then make the reading copy and the preview. Nothing here is kept. */
 export async function prepareImage(file: Blob, rotateQuarterTurns = 0): Promise<PreparedImage> {
   const src = await loadBitmap(file);
   const { w, h } = sizeOf(src);
@@ -120,10 +125,7 @@ export async function prepareImage(file: Blob, rotateQuarterTurns = 0): Promise<
   qctx.drawImage(canvas, 0, 0, q.width, q.height);
   const quality = estimateQuality(qctx.getImageData(0, 0, q.width, q.height));
 
-  // 1) the copy that is kept: natural colours, high quality
-  const blob = await canvasBlob(canvas, 0.9);
-
-  // 2) the copy for reading: mild contrast stretch between the 1st and 99th luminance percentile (bounded, gentle)
+  // 1) the copy for reading: mild contrast stretch between the 1st and 99th luminance percentile (bounded, gentle)
   try {
     const img = ctx.getImageData(0, 0, cw, ch);
     const d = img.data;
@@ -148,13 +150,13 @@ export async function prepareImage(file: Blob, rotateQuarterTurns = 0): Promise<
   } catch { /* unsupported: read the natural copy */ }
   const ocrBlob = await canvasBlob(canvas, 0.93);
 
-  // 3) preview + online-reader copy
+  // 2) preview + online-reader copy
   const ss = Math.min(1, SHOW_EDGE / Math.max(cw, ch));
   const s = document.createElement("canvas");
   s.width = Math.round(cw * ss); s.height = Math.round(ch * ss);
   s.getContext("2d")!.drawImage(canvas, 0, 0, s.width, s.height);
   const dataUrl = s.toDataURL("image/jpeg", 0.85);
-  return { blob, ocrBlob, original: file, dataUrl, width: cw, height: ch, quality };
+  return { ocrBlob, original: file, dataUrl, width: cw, height: ch, quality };
 }
 
 export type OcrCallOutcome =

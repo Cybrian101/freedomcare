@@ -3,7 +3,7 @@
 import { openDB, type IDBPDatabase } from "idb";
 import { createClient } from "@/lib/supabase/client";
 import { completeDistribution, linkAadhaar, markAttendance, setProfilePhoto } from "@/lib/roster";
-import { putThumb, setThumbPath } from "@/lib/local-db";
+import { putThumb, setThumbPath, stripDraftImages } from "@/lib/local-db";
 import { blobToBase64 } from "@/lib/photo-data";
 import { makeThumbnail } from "@/components/camera/compress";
 import {
@@ -14,6 +14,7 @@ import {
   newLinkItem,
   newProfileItem,
   newRegistrationItem,
+  stripCardImages,
   type CompleteResult,
   type QueueItem,
   type QueueRemote,
@@ -209,7 +210,7 @@ export async function submitRegistration(p: {
   id?: string;
   name: string;
   payload: Record<string, unknown>;
-  docs?: { aadhaar?: Blob; udid?: Blob; profile?: Blob };
+  docs?: { profile?: Blob };
 }): Promise<QueueItem> {
   const id = p.id ?? crypto.randomUUID();
   const item = stamp(newRegistrationItem({ id, name: p.name, payload: { ...p.payload, id }, docs: p.docs }));
@@ -217,6 +218,20 @@ export async function submitRegistration(p: {
   await eng.enqueue(item);
   void eng.runOnce();
   return item;
+}
+
+/**
+ * Older app versions kept the photo of the Aadhaar / UDID card on the phone (sync queue and unfinished-registration
+ * drafts). Card images must not be stored anywhere: remove them. Typed details and profile photos are kept.
+ */
+export async function removeStoredCardImages(): Promise<void> {
+  try {
+    for (const i of await idbStore.getAll()) {
+      const clean = stripCardImages(i);
+      if (clean) await idbStore.put(clean);
+    }
+  } catch { /* IndexedDB unavailable: nothing stored */ }
+  await stripDraftImages().catch(() => undefined);
 }
 
 export async function listQueue(): Promise<QueueItem[]> {

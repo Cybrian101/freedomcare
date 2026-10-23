@@ -269,6 +269,13 @@ export async function loadDraft(key: string): Promise<DraftRecord | undefined> {
 export async function deleteDraft(key: string): Promise<void> {
   try { await (await db()).delete("drafts", key); } catch { /* nothing to delete */ }
 }
+/** Drop any card images an older app version kept in a draft. Only the handover-photo draft (photo:<id>) keeps its photo. */
+export async function stripDraftImages(): Promise<void> {
+  const d = await db();
+  for (const r of await d.getAll("drafts")) {
+    if (r.blobs && !r.key.startsWith("photo:")) await d.put("drafts", { ...r, blobs: undefined });
+  }
+}
 export async function listDrafts(): Promise<DraftRecord[]> {
   try { return await (await db()).getAll("drafts"); } catch { return []; }
 }

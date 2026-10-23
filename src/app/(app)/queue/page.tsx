@@ -14,7 +14,7 @@ const KIND: Record<QueueKind, { badge: string; tone: string; line: (i: QueueItem
   attendance: { badge: "Attendance", tone: "bg-sky-100 text-sky-900", line: () => "Attendance marked", plural: "attendance" },
   registration: {
     badge: "New member", tone: "bg-teal-100 text-teal-900", plural: "new member",
-    line: (i) => (i.docs?.aadhaar || i.docs?.udid ? "New member registered, with the scanned card" : "New member registered"),
+    line: (i) => (i.docs?.profile ? "New member registered, with a profile photo" : "New member registered"),
   },
   link: { badge: "Details added", tone: "bg-amber-100 text-amber-900", line: () => "Aadhaar and date of birth added to the existing record", plural: "details added" },
   profile: { badge: "Profile photo", tone: "bg-violet-100 text-violet-900", line: () => "Profile photo taken for this person", plural: "profile photo" },
@@ -55,9 +55,9 @@ const TONE: Record<QueueItem["status"], string> = {
   synced: "bg-emerald-100 text-emerald-900",
 };
 
-/** Photo preview: the handover photo, or the scanned Aadhaar for a new member. Gone once the server has it. */
+/** Photo preview: the handover or profile photo, or a new member's profile photo. Gone once the server has it. */
 function Thumb({ item }: { item: QueueItem }) {
-  const blob = item.blob ?? item.docs?.aadhaar ?? item.docs?.udid ?? null;
+  const blob = item.blob ?? item.docs?.profile ?? null;
   const u = useMemo(() => (blob ? URL.createObjectURL(blob) : null), [blob]);
   useEffect(() => {
     const x = u;
@@ -65,7 +65,7 @@ function Thumb({ item }: { item: QueueItem }) {
   }, [u]);
   if (!u) return null;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={u} alt={kindOf(item) === "handover" ? "Handover photo" : "Scanned card"} className="h-16 w-16 shrink-0 rounded-lg object-cover" />;
+  return <img src={u} alt={kindOf(item) === "handover" ? "Handover photo" : "Profile photo"} className="h-16 w-16 shrink-0 rounded-lg object-cover" />;
 }
 
 const who = (i: QueueItem) => i.ownerName ?? i.ownerEmail ?? "unknown";

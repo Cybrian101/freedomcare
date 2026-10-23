@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, PageHeader, useToast } from "@/components/ui";
 import { DocumentScanner } from "@/components/scan/DocumentScanner";
 import { AadhaarFixHint } from "@/components/scan/AadhaarFixHint";
@@ -59,7 +59,6 @@ export default function RegistrationPage() {
   const [card, setCard] = useState<CardFields>(EMPTY);
   const [scanKey, setScanKey] = useState(0);
   const [saving, setSaving] = useState(false);
-  const image = useRef<Blob | null>(null);
   const [profilePhoto, setProfilePhoto] = useState<Blob | null>(null);
   const { ready } = useDataset();
 
@@ -68,9 +67,8 @@ export default function RegistrationPage() {
   const checksumOk = isValidAadhaar(digits);
   const setField = (k: keyof CardFields, v: string) => setCard((c) => ({ ...c, [k]: v }));
 
-  function onResult(r: OcrResult, img: Blob) {
+  function onResult(r: OcrResult) {
     const v = (k: string) => r.fields[k]?.value ?? "";
-    image.current = img;
     setNum(formatAadhaar(v("aadhaar_no")));
     setCard({
       name: v("name"), dob: DATE_RE.test(v("dob")) ? v("dob") : "", yob: v("yob"), gender: v("gender"), care_of: v("care_of"),
@@ -79,7 +77,6 @@ export default function RegistrationPage() {
     setStep({ s: "confirm", warnings: r.warnings, fromScan: true });
   }
   function reset() {
-    image.current = null;
     setProfilePhoto(null);
     setNum(""); setCard(EMPTY); setScanKey((k) => k + 1); setStep({ s: "capture" });
   }
@@ -118,12 +115,12 @@ export default function RegistrationPage() {
       // Saved on this device first; the server's unique Aadhaar rule re-checks it when it syncs.
       // The id is fixed now, so the profile photo's storage path is tied to THIS new person.
       const newId = crypto.randomUUID();
-      const docs = { ...(image.current ? { aadhaar: image.current } : {}), ...(profilePhoto ? { profile: profilePhoto } : {}) };
+      const docs = profilePhoto ? { profile: profilePhoto } : undefined; // the profile photo only: card images are never kept
       const thumb = profilePhoto ? await blobToBase64(await makeThumbnail(profilePhoto)).catch(() => null) : null;
       const item = await submitRegistration({
         id: newId, name,
         payload: { ...payload, profile_photo_path: profilePhoto ? `${newId}/profile.jpg` : null, profile_thumb: thumb },
-        docs: Object.keys(docs).length ? docs : undefined,
+        docs,
       });
       toast("Saved on this device", "ok");
       setStep({ s: "saved", id: item.id, name, kind: "registration" });

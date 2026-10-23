@@ -25,7 +25,7 @@ async function decode(src: Blob): Promise<Drawable> {
   }
 }
 
-export type PhotoKind = "handover" | "profile" | "document";
+export type PhotoKind = "handover" | "profile"; // photos of ID cards are never stored, so there is no preset for them
 
 export interface CompressOpts {
   /** longest side in pixels */
@@ -42,12 +42,11 @@ export interface CompressOpts {
 /**
  * Stored photos are made smaller WITHOUT visible loss: high JPEG quality (never below `minQuality`), gradual
  * down-scaling with a high-quality filter, and a generous size cap. Only when a file is still over the cap are the pixels
- * reduced a little, never the quality. Typical results: handover ~0.6-1.2 MB, profile ~120-250 KB, scanned card ~1-2 MB.
+ * reduced a little, never the quality. Typical results: handover ~0.6-1.2 MB, profile ~120-250 KB.
  */
 export const PRESETS: Record<PhotoKind, CompressOpts> = {
   handover: { maxDim: 2048, quality: 0.9, minQuality: 0.86, maxBytes: 2.5 * 1024 * 1024 },
   profile: { maxDim: 1280, quality: 0.92, minQuality: 0.88, maxBytes: 700 * 1024, aspect: 3 / 4 },
-  document: { maxDim: 2600, quality: 0.9, minQuality: 0.86, maxBytes: 3 * 1024 * 1024 },
 };
 
 function newCanvas(w: number, h: number) {

@@ -18,8 +18,9 @@ export interface QueueItem {
   /** registration: the beneficiaries row to insert (id is client-generated => insert is idempotent).
    *  attendance: { dob } saved only if the record has none. link: { aadhaar_no, dob, yob } added to a listed person. */
   payload?: Record<string, unknown>
-  /** registration only: scanned documents, uploaded after the row exists */
-  docs?: { aadhaar?: Blob; udid?: Blob; profile?: Blob }
+  /** registration only: the profile photo, uploaded after the row exists. Card images are never kept (older items may
+   *  still hold them; the engine never uploads them and stripCardImages removes them). */
+  docs?: { profile?: Blob }
   docsUploaded?: string[]
   /** login that captured this item. The engine will not upload it under a different login unless `adopted`. */
   ownerId?: string
@@ -83,6 +84,14 @@ export interface QueueRemote {
 }
 
 export const kindOf = (i: Pick<QueueItem, 'kind'>): QueueKind => i.kind ?? 'handover'
+
+/** Older app versions kept the photo of the Aadhaar / UDID card in the queue. Returns the item without it (or null when
+ *  there was nothing to remove), so stored items can be cleaned up once on start. */
+export function stripCardImages(i: QueueItem): QueueItem | null {
+  const d = i.docs as Record<string, Blob | undefined> | undefined
+  if (!d || (!('aadhaar' in d) && !('udid' in d))) return null
+  return { ...i, docs: d.profile ? { profile: d.profile } : undefined }
+}
 
 export const photoPath = (submissionId: string) => `${submissionId}.jpg`
 
@@ -149,7 +158,7 @@ export function newRegistrationItem(p: {
   id: string
   name: string
   payload: Record<string, unknown>
-  docs?: { aadhaar?: Blob; udid?: Blob; profile?: Blob }
+  docs?: { profile?: Blob }
   now?: number
 }): QueueItem {
   const now = p.now ?? Date.now()
@@ -315,21 +324,21 @@ export class SyncEngine {
         const a = cur.payload?.aadhaar_no as string | undefined
         if (!a) throw new QueueError('permanent', 'Aadhaar data missing on this device')
         await this.remote.link(cur.rosterId, a, (cur.payload?.dob as string | null) ?? null, (cur.payload?.yob as number | null) ?? null)
-        await this.store.put({ ...cur, status: 'synced', lastError: null, syncedAt: this.clock(), resolution: 'created' })
+        // the server has the Aadhaar now: the phone keeps no leftover copy
+        await this.store.put({ ...cur, payload: undefined, status: 'synced', lastError: null, syncedAt: this.clock(), resolution: 'created' })
         return true
       }
       if (kind === 'registration') {
         if (!cur.payload) throw new QueueError('permanent', 'Registration data missing on this device')
         await this.remote.register(cur.id, cur.payload) // idempotent on the client-generated id
-        const done = new Set(cur.docsUploaded ?? [])
-        for (const [name, blob] of Object.entries(cur.docs ?? {})) {
-          if (!blob || done.has(name)) continue
-          await this.remote.uploadDoc(`${cur.id}/${name}.jpg`, blob as Blob)
-          done.add(name)
-          cur = { ...cur, docsUploaded: [...done] }
+        const profile = cur.docs?.profile // the only document ever uploaded: card images are never sent
+        if (profile && !(cur.docsUploaded ?? []).includes('profile')) {
+          await this.remote.uploadDoc(`${cur.id}/profile.jpg`, profile)
+          cur = { ...cur, docsUploaded: ['profile'] }
           await this.store.put(cur)
         }
-        await this.store.put({ ...cur, docs: undefined, status: 'synced', lastError: null, syncedAt: this.clock(), resolution: 'created' })
+        // the server has the details now: the phone keeps no leftover copy of the Aadhaar number or address
+        await this.store.put({ ...cur, docs: undefined, payload: undefined, status: 'synced', lastError: null, syncedAt: this.clock(), resolution: 'created' })
         return true
       }
       if (!cur.blob && !cur.uploaded) throw new QueueError('permanent', 'Photo data missing on this device')

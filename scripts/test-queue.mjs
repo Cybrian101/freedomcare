@@ -10,7 +10,7 @@ const out = ts.transpileModule(src, { compilerOptions: { module: 'ESNext', targe
 mkdirSync('.tmp-test', { recursive: true })
 writeFileSync('.tmp-test/queue-core.mjs', out)
 const core = await import(pathToFileURL(process.cwd() + '/.tmp-test/queue-core.mjs').href)
-const { SyncEngine, QueueError, newItem, newAttendanceItem, newLinkItem, newProfileItem, profilePath, newRegistrationItem, photoPath, backoffMs } = core
+const { SyncEngine, QueueError, newItem, newAttendanceItem, newLinkItem, newProfileItem, profilePath, newRegistrationItem, photoPath, backoffMs, stripCardImages } = core
 
 function mk() {
   const db = new Map()
@@ -20,7 +20,7 @@ function mk() {
     put: async (i) => void db.set(i.id, { ...i }),
     delete: async (id) => void db.delete(id),
   }
-  const net = { up: true, uploads: 0, completes: 0, serverSub: null, completeErr: null, attends: 0, lastDob: undefined, links: [], profiles: [], linkErr: null, regs: new Set(), regCalls: 0, docs: 0, regErr: null, docFailOnce: false }
+  const net = { up: true, uploads: 0, completes: 0, serverSub: null, completeErr: null, attends: 0, lastDob: undefined, links: [], profiles: [], linkErr: null, regs: new Set(), regCalls: 0, docs: 0, docPaths: [], regErr: null, docFailOnce: false }
   const remote = {
     attend: async (_r, dob) => {
       if (!net.up) throw new QueueError('network', 'x')
@@ -42,10 +42,11 @@ function mk() {
       if (net.regErr) throw net.regErr
       net.regs.add(id) // set semantics == server primary key: a repeat is not a second row
     },
-    uploadDoc: async () => {
+    uploadDoc: async (path) => {
       if (!net.up) throw new QueueError('network', 'x')
       if (net.docFailOnce) { net.docFailOnce = false; throw new QueueError('transient', 'storage 500') }
       net.docs++
+      net.docPaths.push(path)
     },
     upload: async () => {
       if (!net.up) throw new QueueError('network', 'x')
@@ -185,13 +186,13 @@ test('attendance is queued, synced once, and never marks distribution', async ()
   assert.equal(net.completes, 0)
 })
 
-test('registration: offline keeps payload+docs, resumes, creates exactly one row', async () => {
+test('registration: offline keeps payload+photo, resumes, creates exactly one row', async () => {
   const { db, net, eng, advance } = mk()
   net.up = false
-  await eng.enqueue(newRegistrationItem({ id: 'reg1', name: 'N', payload: { id: 'reg1', name: 'N' }, docs: { aadhaar: new Blob(['a']), udid: new Blob(['u']) }, now: 1_000_000 }))
+  await eng.enqueue(newRegistrationItem({ id: 'reg1', name: 'N', payload: { id: 'reg1', name: 'N' }, docs: { profile: new Blob(['p']) }, now: 1_000_000 }))
   await eng.runOnce()
   assert.equal(db.get('reg1').status, 'failed')
-  assert.ok(db.get('reg1').payload && db.get('reg1').docs.aadhaar, 'nothing discarded while unsynced')
+  assert.ok(db.get('reg1').payload && db.get('reg1').docs.profile, 'nothing discarded while unsynced')
   net.up = true
   advance(400_000)
   net.docFailOnce = true // first doc upload fails after the row insert
@@ -203,6 +204,21 @@ test('registration: offline keeps payload+docs, resumes, creates exactly one row
   assert.equal(db.get('reg1').status, 'synced')
   assert.equal(net.regs.size, 1)
   assert.equal(db.get('reg1').docs, undefined)
+  assert.equal(db.get('reg1').payload, undefined, 'no leftover copy of the details on the phone once the server has them')
+  assert.deepEqual(net.docPaths, ['reg1/profile.jpg'])
+})
+
+test('card images from an older app version are never uploaded, and are stripped', async () => {
+  const { db, net, eng } = mk()
+  const old = newRegistrationItem({ id: 'reg3', name: 'N', payload: { id: 'reg3' }, now: 1_000_000 })
+  old.docs = { aadhaar: new Blob(['a']), udid: new Blob(['u']), profile: new Blob(['p']) }
+  const clean = stripCardImages(old)
+  assert.deepEqual(Object.keys(clean.docs), ['profile'])
+  assert.equal(stripCardImages(clean), null, 'nothing to strip')
+  await eng.enqueue(old) // even unstripped, the engine sends only the profile photo
+  await eng.runOnce()
+  assert.equal(db.get('reg3').status, 'synced')
+  assert.deepEqual(net.docPaths, ['reg3/profile.jpg'])
 })
 
 test('registration rejected (e.g. duplicate Aadhaar) is kept for review, not retried', async () => {

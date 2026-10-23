@@ -2,16 +2,17 @@
 
 import { useRef, useState } from "react";
 import { Button, Card } from "@/components/ui";
-import { prepareImage, readLocal, requestOcr, type PreparedImage } from "@/lib/ocr/client";
+import { ONLINE_READER, prepareImage, readLocal, requestOcr, type PreparedImage } from "@/lib/ocr/client";
 import { normalizeModelOutput } from "@/lib/ocr/normalize";
 import type { OcrKind, OcrResult } from "@/lib/ocr/types";
 
 export interface DocumentScannerProps {
   kind: OcrKind;
-  /** Called with the validated OCR result and the preprocessed JPEG (for optional upload). */
-  onResult: (result: OcrResult, image: Blob) => void;
+  /** Called with the read details only. The photo of the card is never handed out: it is read on the phone and dropped
+   *  (card images must not be stored anywhere). */
+  onResult: (result: OcrResult) => void;
   /** Optional: let the volunteer skip scanning and type details in. */
-  onManual?: (image?: Blob) => void;
+  onManual?: () => void;
   title?: string;
 }
 
@@ -65,37 +66,38 @@ export function DocumentScanner({ kind, onResult, onManual, title }: DocumentSca
   }
 
   /**
-   * Read ON THE DEVICE first (both Aadhaar and UDID/enrolment). If the key number was found, the image never leaves the
-   * phone. The server reader (/api/ocr) is only a fallback. Every failure is "scan did not finish", never "not found".
+   * Read ON THE DEVICE (both Aadhaar and UDID/enrolment). The server reader (/api/ocr) is only a fallback, and only when
+   * ONLINE_READER is switched on (it is off: the card image never leaves the phone). Every failure is "scan did not
+   * finish", never "not found".
    */
   async function read(p: PreparedImage | null = img) {
     if (!p) return;
     setPhase("reading"); setErr(null);
     const local = await runLocal(p);
     if (local.result && local.found) {
-      onResult(local.result, p.blob);
+      onResult(local.result);
       setPhase("ready");
       return;
     }
     const localNote = local.result ? "The on-device reader could not find the number." : "The on-device reader could not run.";
-    if (typeof navigator !== "undefined" && !navigator.onLine) {
+    if (!ONLINE_READER || (typeof navigator !== "undefined" && !navigator.onLine)) {
       if (local.result) { // partial local text is still useful to pre-fill; staff review everything
-        onResult(local.result, p.blob);
+        onResult(local.result);
         setPhase("ready");
         return;
       }
-      setErr({ message: `${localNote} The online reader needs a connection. Retake the photo (try the card flat and well lit) or type the details in.`, retryable: true, code: "network" });
+      setErr({ message: `${localNote} Retake the photo (card flat, well lit, filling the photo) or type the details in.`, retryable: true, code: ONLINE_READER ? "network" : "local" });
       setPhase("error");
       return;
     }
     const out = await requestOcr(kind, p.dataUrl);
     if (out.ok) {
-      onResult(out.result, p.blob);
+      onResult(out.result);
       setPhase("ready");
       return;
     }
     if (out.code === "not_configured" && local.result) { // no online reader set up: use what the device read
-      onResult(local.result, p.blob);
+      onResult(local.result);
       setPhase("ready");
       return;
     }
@@ -106,7 +108,7 @@ export function DocumentScanner({ kind, onResult, onManual, title }: DocumentSca
   async function runLocal(p: PreparedImage): Promise<{ result: OcrResult | null; found: boolean }> {
     setLocalPct(0);
     try {
-      const r = await readLocal(kind, p.ocrBlob, setLocalPct, p.original); // full-resolution copies, not the stored one
+      const r = await readLocal(kind, p.ocrBlob, setLocalPct, p.original); // full-resolution copies
       const result = normalizeModelOutput(r.raw, kind, 1);
       result.warnings.unshift("Read on this device. Check every field against the document.");
       for (const n of r.notes) result.warnings.push(n);
@@ -126,7 +128,7 @@ export function DocumentScanner({ kind, onResult, onManual, title }: DocumentSca
     setPhase("reading"); setErr(null);
     const l = await runLocal(img);
     if (l.result) {
-      onResult(l.result, img.blob);
+      onResult(l.result);
       setPhase("ready");
     } else {
       setErr({ message: "The on-device reader could not run. Type the details in instead.", retryable: false, code: "local" });
@@ -181,7 +183,7 @@ export function DocumentScanner({ kind, onResult, onManual, title }: DocumentSca
             {img && err.code !== "local" && (
               <Button variant="secondary" onClick={readLocally}>Use on-device reading anyway</Button>
             )}
-            {onManual && <Button variant="ghost" onClick={() => onManual(img?.blob)}>Type details instead</Button>}
+            {onManual && <Button variant="ghost" onClick={() => onManual()}>Type details instead</Button>}
           </div>
         </div>
       )}

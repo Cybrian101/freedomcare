@@ -189,8 +189,6 @@ function AdminList() {
             {b.aadhaar_no && !revealed.has(b.id) && <button className="text-sm font-semibold underline" onClick={() => reveal(b.id)}>Show full Aadhaar</button>}
             <div className="grid gap-2">
               {b.profile_photo_path && <Photo bucket="documents" path={b.profile_photo_path} label="profile photo" urls={urls} show={show} />}
-              <Photo bucket="documents" path={`${b.id}/aadhaar.jpg`} label="Aadhaar scan" urls={urls} show={show} />
-              <Photo bucket="documents" path={`${b.id}/udid.jpg`} label="UDID / enrolment scan" urls={urls} show={show} />
             </div>
           </Card>
         ))}

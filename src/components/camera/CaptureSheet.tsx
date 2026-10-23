@@ -25,7 +25,7 @@ export function CaptureSheet({
   initialPhoto,
   onPhotoReady,
 }: {
-  kind: Extract<PhotoKind, "handover" | "profile">;
+  kind: PhotoKind;
   subject: CaptureSubject;
   onCancel: () => void;
   onSubmit: (jpeg: Blob) => void | Promise<void>;

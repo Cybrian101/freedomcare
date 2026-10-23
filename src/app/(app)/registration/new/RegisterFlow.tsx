@@ -54,12 +54,11 @@ export function RegisterFlow() {
   const [dupMsg, setDupMsg] = useState<{ text: string; href?: string } | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [saveErr, setSaveErr] = useState<string | null>(null);
-  const blobs = useRef<{ aadhaar?: Blob; udid?: Blob; profile?: Blob }>({});
   const [profilePhoto, setProfilePhoto] = useState<Blob | null>(null);
   const DRAFT = "registration";
   // null = still checking the device; "none" = nothing to resume / decision made
   const [resume, setResume] = useState<{ name: string; at: number } | "none" | null>(null);
-  const restored = useRef<{ form: Form; step: number; blobs?: { aadhaar?: Blob; udid?: Blob } } | null>(null);
+  const restored = useRef<{ form: Form; step: number } | null>(null);
 
   // Details carried over from the scan screen. They travel in this tab's session storage, NOT in the address: a URL with an
   // Aadhaar number in it would end up in browser history and in server logs.
@@ -84,19 +83,20 @@ export function RegisterFlow() {
       if (dead) return;
       const f = d?.data?.form as Form | undefined;
       if (d && f && (f.name || f.aadhaar_no)) {
-        restored.current = { form: f, step: Number(d.data.step) || 0, blobs: d.blobs as { aadhaar?: Blob; udid?: Blob } | undefined };
+        restored.current = { form: f, step: Number(d.data.step) || 0 };
         setResume({ name: f.name || "unnamed", at: d.savedAt });
       } else setResume("none");
     });
     return () => { dead = true; };
   }, []);
 
-  // Autosave every change (debounced) so a refresh, crash or locked phone loses nothing.
+  // Autosave every change (debounced) so a refresh, crash or locked phone loses nothing. Only the typed details are kept;
+  // the photos of the cards are never stored.
   useEffect(() => {
     if (resume !== "none" || savedId) return;
-    if (!form.name && !form.aadhaar_no && step === 0 && !blobs.current.aadhaar && !blobs.current.udid) return;
+    if (!form.name && !form.aadhaar_no && step === 0) return;
     const t = setTimeout(() => {
-      void saveDraft(DRAFT, { form, step }, blobs.current as Record<string, Blob>).catch(() => undefined);
+      void saveDraft(DRAFT, { form, step }).catch(() => undefined);
     }, 600);
     return () => clearTimeout(t);
   }, [form, step, resume, savedId]);
@@ -184,7 +184,7 @@ export function RegisterFlow() {
       // Persist to IndexedDB FIRST. "Saved" below means "safe on this device", not "on the server".
       // The id is fixed now, so the photo's storage path is tied to THIS new person.
       const newId = crypto.randomUUID();
-      const docs = { ...blobs.current, ...(profilePhoto ? { profile: profilePhoto } : {}) };
+      const docs = profilePhoto ? { profile: profilePhoto } : undefined; // the profile photo only: card images are never kept
       const thumb = profilePhoto ? await blobToBase64(await makeThumbnail(profilePhoto)).catch(() => null) : null;
       const item = await submitRegistration({ id: newId, name: payload.name, payload: { ...payload, profile_photo_path: profilePhoto ? `${newId}/profile.jpg` : null, profile_thumb: thumb }, docs });
       setSavedId(item.id);
@@ -200,7 +200,7 @@ export function RegisterFlow() {
   function again() {
     void deleteDraft(DRAFT);
     setForm({ ...EMPTY }); setMeta({}); setReview(new Set()); setWarnings([]); setErrors({});
-    setSavedId(null); setDupMsg(null); blobs.current = {}; setProfilePhoto(null); setStep(0);
+    setSavedId(null); setDupMsg(null); setProfilePhoto(null); setStep(0);
   }
 
   const field = (k: FormKey, extra: Partial<React.ComponentProps<typeof ConfidenceField>> = {}) => (
@@ -244,7 +244,7 @@ export function RegisterFlow() {
           </p>
           <Button full size="lg" onClick={() => {
             const r = restored.current!;
-            setForm(r.form); setStep(r.step); blobs.current = r.blobs ?? {};
+            setForm(r.form); setStep(r.step);
             setResume("none");
           }}>Continue where I left off</Button>
           <Button full variant="secondary" onClick={() => { void deleteDraft(DRAFT); setResume("none"); }}>Discard and start new</Button>
@@ -266,7 +266,7 @@ export function RegisterFlow() {
       {step === 0 && (
         <>
           <DocumentScanner kind="aadhaar"
-            onResult={(r, blob) => { blobs.current.aadhaar = blob; applyResult(r); setStep(1); }}
+            onResult={(r) => { applyResult(r); setStep(1); }}
             onManual={() => setStep(1)} />
           {carried && <p className="text-sm text-ink-muted">Aadhaar number carried over from the scan screen.</p>}
         </>
@@ -275,7 +275,7 @@ export function RegisterFlow() {
       {step === 1 && (
         <>
           <DocumentScanner kind="udid"
-            onResult={(r, blob) => { blobs.current.udid = blob; applyResult(r); setStep(2); }}
+            onResult={(r) => { applyResult(r); setStep(2); }}
             onManual={() => setStep(2)} />
           <Button variant="ghost" full onClick={() => setStep(2)}>No disability document - skip</Button>
           <Button variant="ghost" full onClick={() => setStep(0)}>Back</Button>
