@@ -88,12 +88,17 @@ function parseSecure(parts: string[]): AadhaarQr | null {
   const f = (n: number) => clean(parts[r + n]);
   const { dob, yob } = isoDob(f(2));
   const gender = GENDER[(f(3) ?? "").toUpperCase()] ?? null;
-  const pincode = f(9);
-  // Sanity checks: a mismatch means the layout is not what we expect, so nothing from this QR is trusted.
-  if (!f(1) || (!dob && !yob) || !gender || !pincode || !/^\d{6}$/.test(pincode)) return null;
+  const pin = f(9);
+  const pincode = pin && /^\d{6}$/.test(pin) ? pin : null;
+  const name = f(1);
+  // Sanity checks: the date of birth, gender and pincode sit at fixed places after the name. When at least two of them are
+  // where they should be, the layout is the expected one and the name can be trusted even if the third field is odd
+  // (losing a good name over one unusual field was the commonest failure). Fewer than two: nothing is trusted.
+  const checks = [!!(dob || yob), !!gender, !!pincode].filter(Boolean).length;
+  if (!name || !/^[\p{L}][\p{L}\p{M} .'-]+$/u.test(name) || checks < 2) return null;
   return {
     kind: "secure",
-    name: f(1),
+    name,
     dob,
     yob,
     gender,

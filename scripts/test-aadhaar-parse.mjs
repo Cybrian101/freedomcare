@@ -122,3 +122,33 @@ ${GROUPED}`), "name");
   assert.equal(f("Mohamed Ibrahim S"), "Mohamed Ibrahim S");
   assert.equal(f("RAMESH KUMAR"), "RAMESH KUMAR");
 });
+
+// What the English-only reader makes of the Tamil / Hindi name printed above the English one: long Latin-looking junk.
+const TA_JUNK = "aera Gamer Qs Gwe";
+const front = (name, dobLine = "DOB: 14/03/1982", above = TA_JUNK) => `Government of India
+${above}
+${name}
+${dobLine}
+Male
+${GROUPED}`;
+
+test("name: the regional-language line above the English name does not win, even when it is longer", () => {
+  assert.equal(v(parseAadhaarText(front("Ravi Kumar")), "name"), "Ravi Kumar");
+  assert.equal(v(parseAadhaarText(front("Ravi Kumar", "DOB: 14/03/1982", "Uae eam ReMeuwer Gaumrwer aw")), "name"), "Ravi Kumar");
+});
+
+test("name: names containing words like 'male' are not rejected", () => {
+  assert.equal(v(parseAadhaarText(front("Kamalesh Raman")), "name"), "Kamalesh Raman");
+  assert.equal(v(parseAadhaarText(front("Amalendu Dey")), "name"), "Amalendu Dey");
+  assert.equal(v(parseAadhaarText(front("Hemalatha S")), "name"), "Hemalatha S");
+});
+
+test("name: misread DOB labels and a date with no label still anchor the name", () => {
+  assert.equal(v(parseAadhaarText(front("Ravi Kumar", "D0B: 14/03/1982")), "name"), "Ravi Kumar");
+  assert.equal(v(parseAadhaarText(front("Ravi Kumar", "Gl DOB:14/03/1982")), "name"), "Ravi Kumar");
+  assert.equal(v(parseAadhaarText(`Government of India\n${TA_JUNK}\nRavi Kumar\n14/03/1982\nMaie\n${GROUPED}`), "name"), "Ravi Kumar");
+});
+
+test("name: stray lower-case fragments at the start of the name line are dropped", () => {
+  assert.equal(v(parseAadhaarText(front("ee Lakshmi Narayanan")), "name"), "Lakshmi Narayanan");
+});

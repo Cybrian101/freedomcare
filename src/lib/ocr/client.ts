@@ -4,7 +4,7 @@
 import { extractAadhaarFromText, suggestAadhaarFixes, formatAadhaar } from "./verhoeff";
 import { extractUdid } from "@/lib/udid";
 import { parseUdidText } from "./udid-parse";
-import { parseAadhaarText } from "./aadhaar-parse";
+import { nameAnchor, parseAadhaarText, strongName } from "./aadhaar-parse";
 import { readAadhaarQr } from "./qr-read";
 import { binarizeBlob, canvasBlob, cropBlob, transformBlob } from "./image-ops";
 import type { AadhaarQr } from "./aadhaar-qr";
@@ -191,7 +191,7 @@ export interface LocalRead {
   raw: Record<string, { value: string | null; confidence: number } | number>;
   /** the key identifier (valid Aadhaar number / UDID or enrolment number) was found */
   found: boolean;
-  rotatedTurns: 0 | 1 | 3;
+  rotatedTurns: 0 | 1 | 2 | 3;
   /** plain-language notes for the person scanning (what was read from the QR, what was corrected, what to check) */
   notes: string[];
 }
@@ -231,11 +231,12 @@ export async function warmOcrEngine(): Promise<boolean> {
 
 type Worker = Awaited<ReturnType<(typeof import("tesseract.js"))["createWorker"]>>;
 type Box = { x0: number; y0: number; x1: number; y1: number };
-type Page = { data: { text: string; confidence: number; blocks?: { paragraphs?: { lines?: { text: string; bbox: Box }[] }[] }[] | null } };
+type Line = { text: string; bbox: Box; confidence?: number };
+type Page = { data: { text: string; confidence: number; blocks?: { paragraphs?: { lines?: Line[] }[] }[] | null } };
 
 const lineBoxes = (page: Page) => {
-  const out: { text: string; bbox: Box }[] = [];
-  for (const b of page.data.blocks ?? []) for (const p of b.paragraphs ?? []) for (const l of p.lines ?? []) out.push({ text: l.text, bbox: l.bbox });
+  const out: Line[] = [];
+  for (const b of page.data.blocks ?? []) for (const p of b.paragraphs ?? []) for (const l of p.lines ?? []) out.push({ text: l.text, bbox: l.bbox, confidence: l.confidence });
   return out;
 };
 
@@ -243,10 +244,10 @@ const lineBoxes = (page: Page) => {
  * Cards are often photographed sideways. Find the right way up on a SMALL copy (fast), so the slow full-resolution read is
  * done once, not three times. Returns the full-size image already turned the right way.
  */
-async function turnUpright(worker: Worker, image: Blob, isHit: (text: string) => boolean): Promise<{ img: Blob; turns: 0 | 1 | 3; hit: boolean }> {
+async function turnUpright(worker: Worker, image: Blob, isHit: (text: string) => boolean): Promise<{ img: Blob; turns: 0 | 1 | 2 | 3; hit: boolean }> {
   const small = await transformBlob(image, { maxEdge: 1100 }, 0.85);
-  let best: { score: number; turns: 0 | 1 | 3; hit: boolean } | null = null;
-  for (const turns of [0, 1, 3] as const) {
+  let best: { score: number; turns: 0 | 1 | 2 | 3; hit: boolean } | null = null;
+  for (const turns of [0, 1, 3, 2] as const) { // sideways is common; upside down is tried last
     const probe = turns === 0 ? small : await transformBlob(small, { turns }, 0.85);
     const { data } = await worker.recognize(probe);
     const hit = isHit(data.text);
@@ -262,6 +263,17 @@ async function digitsOnlyPass(worker: Worker, img: Blob, mode: "7" | "11"): Prom
   await worker.setParameters({ tessedit_char_whitelist: "0123456789 ", tessedit_pageseg_mode: mode as never });
   try {
     return (await worker.recognize(img)).data.text;
+  } finally {
+    await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" as never });
+  }
+}
+
+/** One enlarged line read as letters only (names never contain digits or symbols). */
+async function lettersOnlyPass(worker: Worker, img: Blob): Promise<{ text: string; confidence: number }> {
+  await worker.setParameters({ tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .", tessedit_pageseg_mode: "7" as never });
+  try {
+    const { data } = await worker.recognize(img);
+    return { text: data.text.trim(), confidence: data.confidence };
   } finally {
     await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" as never });
   }
@@ -364,6 +376,28 @@ export async function readLocal(
     }
 
     const raw: LocalRead["raw"] = { ...parsed.raw, aadhaar_no: { value: number.value, confidence: numberConf } };
+
+    // 5) no name from the QR: re-read the lines just above the date of birth one at a time, enlarged and letters only.
+    // The English name is the nearest one that reads cleanly; the regional-language name above it does not.
+    if (!qr?.name) {
+      base = 0.9; span = 0.09;
+      const boxes = lineBoxes(full).filter((b) => b.text.trim());
+      const anchor = nameAnchor(boxes.map((b) => b.text.trim()));
+      const textName = (raw.name as { value: string | null }).value;
+      for (let i = anchor - 1; i >= Math.max(0, anchor - 3); i--) {
+        const line = boxes[i]!;
+        const read = await lettersOnlyPass(worker, await cropBlob(up.img, line.bbox, { pad: 10, targetH: 90 }));
+        // the whole-page reading of this line wins when it is already a clean name and was read at least as surely
+        const whole = strongName(line.text);
+        const n = whole && (line.confidence ?? 0) >= read.confidence ? whole : strongName(read.text) ?? whole;
+        const conf = n === whole ? line.confidence ?? 0 : read.confidence;
+        if (n && (n === whole || conf >= (textName ? 60 : 45))) {
+          raw.name = { value: n, confidence: conf >= 80 ? 0.6 : 0.45 };
+          break;
+        }
+      }
+    }
+
     if (qr) {
       const set = (k: string, v: string | null, c = 0.95) => { if (v) raw[k] = { value: v, confidence: c }; };
       set("name", qr.name);

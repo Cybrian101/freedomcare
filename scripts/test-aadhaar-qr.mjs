@@ -92,8 +92,19 @@ test('anything that does not look right is rejected, never guessed', async () =>
   assert.equal(await parseAadhaarQr('hello', gunzip), null)
   assert.equal(await parseAadhaarQr('https://example.com/x', gunzip), null)
   assert.equal(await parseAadhaarQr('1'.repeat(400), gunzip), null) // numeric but not gzip data
+  const twoBad = [...FIELDS]; twoBad[2] = 'yesterday'; twoBad[3] = 'X' // date and gender both out of place: wrong layout
+  assert.equal(await parseAadhaarQr(secureText(twoBad), gunzip), null)
+  const notName = [...FIELDS]; notName[1] = '12345'
+  assert.equal(await parseAadhaarQr(secureText(notName), gunzip), null)
+})
+
+test('one odd field does not lose the name (the other checks confirm the layout)', async () => {
   const bad = [...FIELDS]; bad[9] = 'ABCDEF' // pincode not 6 digits
-  assert.equal(await parseAadhaarQr(secureText(bad), gunzip), null)
+  const r = await parseAadhaarQr(secureText(bad), gunzip)
+  assert.equal(r.name, 'Ramesh Kumar Selvam')
+  assert.equal(r.pincode, null)
   const badDob = [...FIELDS]; badDob[2] = 'yesterday'
-  assert.equal(await parseAadhaarQr(secureText(badDob), gunzip), null)
+  const d = await parseAadhaarQr(secureText(badDob), gunzip)
+  assert.equal(d.name, 'Ramesh Kumar Selvam')
+  assert.equal(d.dob, null)
 })

@@ -11,7 +11,11 @@ const STATES = [
 ];
 const STATE_RE = new RegExp(`\\b(${STATES.map((s) => s.replace(/ /g, "\\s+")).join("|")})\\b`, "gi");
 
-const NOT_A_NAME = /government|india|aadhaar|aadhar|unique|authority|male|female|transgender|address|enrol|dob|birth|year|\bvid\b|virtual|help|uidai|www|download|issue|mobile|signature|digitally/i;
+// Whole words only: "Kamalesh" and "Amalendu" contain "male" but are names.
+const NOT_A_NAME = /\b(government|govt|india|aadhaar|aadhar|unique|identification|authority|male|female|transgender|address|enrol\w*|dob|birth|year|vid|virtual|help|uidai|www|download\w*|issue\w*|mobile|signature|digitally|date)\b/i;
+/** The date-of-birth line, tolerating common misreads of the label ("D0B", "DOB:" glued to the date). */
+const DOB_LABEL = /\bd[o0]b\b|d[o0]b\s*[:.]|date of birth|year of birth|\by[o0]b\b/i;
+const GENDER_LINE = /\b(fe)?male\b|transgender/i;
 const BLOCK_END = /^\W*(vid\b|virtual id|help@|www\.|email|1947|uidai|aadhaar\s+(is|no)|\d{4}\s?\d{4}\s?\d{4}(\s?\d{4})?\W*$)/i;
 const CARE_OF = /\b([SDWC])\s*\/\s*[O0]\s*[:.,-]?\s*([A-Za-z][A-Za-z .]*)/i;
 const DATE = /(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{4})/;
@@ -32,17 +36,46 @@ function asName(line: string): string | null {
   return cleaned;
 }
 
+/** A word as Aadhaar prints names: Capitalised ("Ramesh"), all capitals ("RAMESH") or an initial ("S", "S."). */
+const NAME_WORD = /^(?:[A-Z][a-z]+|[A-Z]{2,}|[A-Z]\.?)$/;
+
+/**
+ * Strict check for a printed name line, after trimming stray words at the start (OCR noise from the photo edge or the
+ * regional-language name above it often lands there as lower-case fragments). Returns the name or null.
+ */
+export function strongName(line: string): string | null {
+  const n = asName(line);
+  if (!n) return null;
+  const words = n.split(" ").filter(Boolean);
+  while (words.length > 1 && !NAME_WORD.test(words[0]!)) words.shift();
+  if (!words.every((w) => NAME_WORD.test(w))) return null;
+  if (!words.some((w) => w.replace(/\./g, "").length >= 3)) return null;
+  return dropTrailingJunk(words.join(" "));
+}
+
+/** Index of the line the name sits just above: date of birth, else gender, else a line with a date. -1 when none. */
+export function nameAnchor(lines: string[]): number {
+  let a = lines.findIndex((l) => DOB_LABEL.test(l));
+  if (a === -1) a = lines.findIndex((l) => GENDER_LINE.test(l));
+  if (a === -1) a = lines.findIndex((l) => DATE.test(l) && !/issue|download|generated|print/i.test(l));
+  return a;
+}
+
 function guessName(lines: string[]): string | null {
   const to = lines.findIndex((l) => /^to\W*$/i.test(l)); // e-Aadhaar letter: "To" then the name
   if (to !== -1 && lines[to + 1]) {
     const n = asName(lines[to + 1]);
     if (n) return n;
   }
-  // card front: Name, then DOB, then gender. Anchor on whichever of those lines was read.
-  let anchor = lines.findIndex((l) => /\bdob\b|date of birth|year of birth|\byob\b/i.test(l));
-  if (anchor === -1) anchor = lines.findIndex((l) => /\b(fe)?male\b|transgender/i.test(l));
-  // Several lines above the anchor can look "name-like" (OCR noise from the photo box or the logo). Prefer the one with the
-  // most real words and letters; on a tie the line nearest the anchor wins.
+  // Card front: regional-language name, English name, then DOB, then gender. Anchor on whichever of those was read.
+  const anchor = nameAnchor(lines);
+  // The English name is the line right above the date of birth. Take the NEAREST line that reads as a printed name; the
+  // regional-language name above it comes out of the English reader as long junk, so "longest line" would pick it.
+  for (let i = anchor - 1; i >= Math.max(0, anchor - 4); i--) {
+    const n = strongName(lines[i]);
+    if (n) return n;
+  }
+  // Nothing clean: fall back to the most name-like line (most real words and letters), nearest first on a tie.
   let best: { name: string; score: number } | null = null;
   for (let i = anchor - 1; i >= Math.max(0, anchor - 6); i--) {
     const n = asName(lines[i]);
@@ -65,7 +98,7 @@ function dropTrailingJunk(name: string): string {
 
 function findDob(lines: string[]): RawField {
   for (let i = 0; i < lines.length; i++) {
-    if (!/\bdob\b|date of birth|d\.o\.b/i.test(lines[i])) continue;
+    if (!DOB_LABEL.test(lines[i]) && !/d\.o\.b/i.test(lines[i])) continue;
     const m = DATE.exec(lines[i]) ?? DATE.exec(lines[i + 1] ?? "");
     if (m) return { value: `${m[1]}/${m[2]}/${m[3]}`, confidence: 0.5 };
   }
