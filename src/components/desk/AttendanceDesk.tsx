@@ -7,12 +7,14 @@ import { AadhaarFixHint } from "@/components/scan/AadhaarFixHint";
 import { useDataset } from "@/components/DatasetPanel";
 import { Avatar } from "@/components/desk/Avatar";
 import { ProfilePhotoAction } from "@/components/desk/ProfilePhotoAction";
+import { CaptureSheet } from "@/components/camera/CaptureSheet";
 import { useSync } from "@/components/SyncProvider";
 import { createClient } from "@/lib/supabase/client";
-import { allLocal, asRosterStatus, getLocal, searchLocal, type LocalBeneficiary } from "@/lib/local-db";
+import { allLocal, asRosterStatus, getLocal, getThumb, searchLocal, type LocalBeneficiary } from "@/lib/local-db";
 import { lookupAadhaar, type Candidate } from "@/lib/matching";
 import { looksLikeAadhaar, rankByNameDob, type MatchLevel } from "@/lib/attendance-match";
-import { kindOf, submitAttendance } from "@/lib/offline-queue";
+import { kindOf, submitAttendance, submitProfilePhoto } from "@/lib/offline-queue";
+import { buzz } from "@/lib/haptic";
 import { digitsOnly, isValidAadhaar } from "@/lib/ocr/verhoeff";
 import { formatAadhaar, maskAadhaar } from "@/lib/aadhaar";
 import type { OcrResult } from "@/lib/ocr/types";
@@ -41,6 +43,8 @@ function stub(c: Candidate): LocalBeneficiary {
  * Attendance desk. Three ways to find the person, all reading the on-device list so they work offline:
  * type (Reg. No. / name / Aadhaar), scan the Aadhaar, or - when there is no Aadhaar - name + date of birth.
  * Marking attendance is saved on the device first and synced like every other action.
+ * Flow: scan -> the person is listed -> Mark present -> the camera opens for a profile photo ONLY if the person has none
+ * -> the screen is cleared for the next person (the scanner opens again when the last person was scanned).
  */
 export function AttendanceDesk() {
   const toast = useToast();
@@ -57,7 +61,11 @@ export function AttendanceDesk() {
   const [looking, setLooking] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [sure, setSure] = useState<string | null>(null);
+  const [photoFor, setPhotoFor] = useState<LocalBeneficiary | null>(null);
+  const [scanKey, setScanKey] = useState(0);
   const seq = useRef(0);
+  const byScan = useRef(false);
+  const input = useRef<HTMLInputElement>(null);
 
   // Live search while typing a Reg. No. or name (a full Aadhaar number is looked up explicitly, see onType).
   useEffect(() => {
@@ -140,6 +148,7 @@ export function AttendanceDesk() {
   function onScan(r: OcrResult) {
     const num = digitsOnly(r.fields.aadhaar_no?.value ?? "");
     setScanning(false);
+    byScan.current = true;
     setQ(formatAadhaar(num));
     const scanned = { name: r.fields.name?.value ?? undefined, dob: r.fields.dob?.value ?? undefined };
     if (num.length === 12 && isValidAadhaar(num)) void runAadhaar(num, scanned);
@@ -153,18 +162,44 @@ export function AttendanceDesk() {
     }
   }
 
+  /** Does this person already have a profile photo (on the server, taken on this phone, or waiting to upload)? */
+  async function hasPhoto(r: LocalBeneficiary) {
+    if (r.has_photo || items.some((i) => i.rosterId === r.id && kindOf(i) === "profile")) return true;
+    return !!(await getThumb(r.id).catch(() => undefined));
+  }
+
+  /** Clear the screen for the next person. */
+  function next() {
+    seq.current++;
+    setPhotoFor(null); setHits([]); setSearched(false); setNotice(null); setSure(null);
+    setQ(""); setName(""); setDob(""); setMode("find");
+    if (byScan.current) { setScanKey((k) => k + 1); setScanning(true); } // the last one was scanned: ready to scan again
+    else input.current?.focus();
+    byScan.current = false;
+  }
+
   async function mark(h: Hit) {
     setBusy(h.row.id);
     try {
       // A date of birth typed here is kept on the record only if it has none yet (so the next visit can match on it).
       await submitAttendance({ rosterId: h.row.id, regNo: h.row.reg_no, name: h.row.name, dob: mode === "name" && dob && !h.row.dob ? dob : null });
-      toast(`Attendance saved for ${h.row.name}`, "ok");
+      buzz();
+      toast(`Present: ${h.row.reg_no ?? ""} ${h.row.name}`.trim(), "ok");
       setSure(null);
+      if (await hasPhoto(h.row)) next();
+      else setPhotoFor(h.row);
     } catch {
       toast("Could not save on this device. Storage may be full or blocked.", "bad");
     } finally {
       setBusy(null);
     }
+  }
+
+  async function savePhoto(r: LocalBeneficiary, blob: Blob) {
+    await submitProfilePhoto({ rosterId: r.id, regNo: r.reg_no, name: r.name, blob });
+    buzz();
+    toast(`Photo saved for ${r.name}`, "ok");
+    next();
   }
 
   const attendanceByRoster = useMemo(() => {
@@ -190,6 +225,7 @@ export function AttendanceDesk() {
       {mode === "find" && (
         <div className="space-y-3">
           <input
+            ref={input}
             autoFocus
             value={q}
             onChange={(e) => onType(e.target.value)}
@@ -206,10 +242,14 @@ export function AttendanceDesk() {
               <Button variant="secondary" full onClick={() => { setMode("name"); setHits([]); setSearched(false); }}>No Aadhaar card? Match by name and date of birth</Button>
             </>
           )}
-          {!scanning && <Button variant="secondary" full onClick={() => setScanning(true)}>Scan Aadhaar card</Button>}
+          {!scanning && (
+            <Button variant={hits.length ? "secondary" : "primary"} size="lg" full onClick={() => { setScanKey((k) => k + 1); setScanning(true); }}>
+              {hits.length ? "Scan another card" : "Scan Aadhaar card"}
+            </Button>
+          )}
           {scanning && (
             <div className="space-y-2">
-              <DocumentScanner kind="aadhaar" onResult={(r) => onScan(r)} onManual={() => setScanning(false)} />
+              <DocumentScanner key={scanKey} kind="aadhaar" onResult={(r) => onScan(r)} onManual={() => setScanning(false)} />
               <Button variant="ghost" full onClick={() => setScanning(false)}>Cancel scan</Button>
             </div>
           )}
@@ -312,19 +352,30 @@ export function AttendanceDesk() {
                   <Button variant="danger" full onClick={() => setSure(r.id)}>Date of birth differs. Check before marking</Button>
                 ) : (
                   <Button size="lg" full loading={busy === r.id} onClick={() => void mark(h)}>
-                    {risky ? "Yes, same person. Mark attendance" : "Mark attendance"}
+                    {risky ? "Yes, same person. Mark present" : "Mark present"}
                   </Button>
                 )}
                 <div className="space-y-1">
                   <ProfilePhotoAction person={r} hasPhoto={r.has_photo} variant={done ? "primary" : "secondary"} full />
                 </div>
                 <a href={`/distribution/profile?id=${r.id}`} className="block py-1 text-center text-sm font-semibold text-teal-700 underline">Open full record</a>
+                {done && <Button variant="ghost" full onClick={next}>Next person</Button>}
               </Card>
             </li>
           );
         })}
       </ul>
      </div>
+
+      {photoFor && (
+        <CaptureSheet
+          kind="profile"
+          heading="Present. Now a profile photo for"
+          subject={{ name: photoFor.name, regNo: photoFor.reg_no }}
+          onCancel={next}
+          onSubmit={(b) => savePhoto(photoFor, b)}
+        />
+      )}
     </div>
   );
 }
