@@ -58,8 +58,19 @@ export function AdminStaff() {
     <div className="space-y-4">
       <Card>
         <form ref={form} action={add} className="space-y-3" autoComplete="off">
-          <h2 className="text-lg font-bold text-ink">Add a staff member</h2>
-          <p className="text-sm text-ink-muted">Only people you add here can sign in. They can scan, register, mark attendance and distribute. Only admins see this page and the activity log.</p>
+          <h2 className="text-lg font-bold text-ink">Add a login</h2>
+          <p className="text-sm text-ink-muted">Only people you add here can sign in. Only admins see this page and the activity log.</p>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1.5 text-sm font-semibold text-ink-soft">Type of login</legend>
+            <label className="flex min-h-12 items-start gap-3 rounded-2xl border border-line px-4 py-3 has-[:checked]:border-teal-600 has-[:checked]:bg-teal-50">
+              <input type="radio" name="role" value="staff" defaultChecked className="mt-1 size-5 accent-teal-700" />
+              <span><b className="text-ink">Staff</b><br /><span className="text-sm text-ink-muted">Registers, marks attendance and distributes.</span></span>
+            </label>
+            <label className="flex min-h-12 items-start gap-3 rounded-2xl border border-line px-4 py-3 has-[:checked]:border-teal-600 has-[:checked]:bg-teal-50">
+              <input type="radio" name="role" value="viewer" className="mt-1 size-5 accent-teal-700" />
+              <span><b className="text-ink">Dashboard</b><br /><span className="text-sm text-ink-muted">Only looks: totals, everyone&apos;s details and photos. Cannot change anything.</span></span>
+            </label>
+          </fieldset>
           <label className="block text-sm font-semibold text-ink-soft">Name
             <input name="full_name" required minLength={2} maxLength={60} className={INPUT} />
           </label>
@@ -83,7 +94,7 @@ export function AdminStaff() {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate text-lg font-bold text-ink">{r.full_name || r.email}</p>
-              <p className="truncate text-sm text-ink-muted">{r.full_name ? `${r.email} · ` : ""}{r.role === "admin" ? "Admin" : "Staff"}</p>
+              <p className="truncate text-sm text-ink-muted">{r.full_name ? `${r.email} · ` : ""}{r.role === "admin" ? "Admin" : r.role === "viewer" ? "Dashboard (view only)" : "Staff"}</p>
               <p className="text-xs text-ink-muted">
                 {r.last_sign_in_at ? `Last signed in ${new Date(r.last_sign_in_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}` : "Has not signed in yet"}
               </p>

@@ -1,8 +1,10 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button, Card, PageHeader, SegmentedControl } from "@/components/ui";
 import { AdminStaff } from "@/components/admin/AdminStaff";
 import { AdminActivity } from "@/components/admin/AdminActivity";
+import { Photo, useSignedUrl } from "@/components/PhotoLink";
 import { createClient } from "@/lib/supabase/client";
 import { useRole } from "@/lib/role";
 import { maskAadhaar, formatAadhaar } from "@/lib/aadhaar";
@@ -17,17 +19,12 @@ const PAGE = 40;
  */
 export default function AdminPage() {
   const { role, loaded } = useRole();
+  const router = useRouter();
+  const allowed = role === "admin";
+  // Anyone else is sent home: staff and dashboard logins never see this page at all.
+  useEffect(() => { if (loaded && !allowed) router.replace("/"); }, [loaded, allowed, router]);
   if (!loaded) return <p className="p-4 text-ink-muted">Checking access...</p>;
-  if (role !== "admin") {
-    return (
-      <div className="mx-auto w-full max-w-xl">
-        <Card className="space-y-2">
-          <h1 className="text-lg font-extrabold text-ink">Admins only</h1>
-          <p className="text-ink-muted">This page lists every beneficiary and photo. Ask an administrator for access.</p>
-        </Card>
-      </div>
-    );
-  }
+  if (!allowed) return null;
   return <AdminTabs />;
 }
 
@@ -57,26 +54,6 @@ function AdminTabs() {
       )}
     </>
   );
-}
-
-function useSignedUrl() {
-  const [urls, setUrls] = useState<Record<string, string | "error">>({});
-  const show = useCallback(async (bucket: "handover-photos" | "documents", path: string) => {
-    const key = `${bucket}/${path}`;
-    const { data, error } = await createClient().storage.from(bucket).createSignedUrl(path, 120); // 2-minute link
-    setUrls((u) => ({ ...u, [key]: error || !data ? "error" : data.signedUrl }));
-  }, []);
-  return { urls, show };
-}
-
-function Photo({ bucket, path, label, urls, show }: { bucket: "handover-photos" | "documents"; path: string; label: string; urls: Record<string, string>; show: (b: "handover-photos" | "documents", p: string) => void }) {
-  const u = urls[`${bucket}/${path}`];
-  if (u === "error") return <p className="text-xs text-bad-fg">{label}: not available (not uploaded yet, or no permission).</p>;
-  if (u) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={u} alt={label} loading="lazy" className="mt-2 max-h-72 w-full rounded-2xl border border-line object-contain bg-sage-100" />;
-  }
-  return <Button variant="secondary" onClick={() => show(bucket, path)}>Show {label}</Button>;
 }
 
 function AdminList() {

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { rosterCounts } from "@/lib/roster";
 import { DatasetPanel } from "@/components/DatasetPanel";
 import { EndOfDayCard } from "@/components/SyncProvider";
-import { Card, Page, PageHeader, ProgressRing, SectionTitle, Skeleton, Stat } from "@/components/ui";
+import { Button, Card, Page, PageHeader, ProgressRing, SectionTitle, Skeleton, Stat } from "@/components/ui";
 import { OfflineReadiness } from "@/components/OfflineReadiness";
 import { InstallPrompt } from "@/components/InstallPrompt";
 import { StaffHome } from "@/components/StaffHome";
@@ -46,7 +46,11 @@ export function Dashboard() {
   return (
     <StaffHome>
     <Page width="wide">
-      <PageHeader title="Camp dashboard" subtitle="Distribution camp, Santhome, Chennai · 24 Oct 2026" />
+      <PageHeader
+        title="Camp dashboard"
+        subtitle="Distribution camp, Santhome, Chennai · 24 Oct 2026"
+        action={<Button href="/dashboard" variant="secondary">Full dashboard</Button>}
+      />
       <Suspense
         fallback={
           <>

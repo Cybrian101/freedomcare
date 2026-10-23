@@ -1,8 +1,8 @@
 "use client";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useSyncExternalStore } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useSyncExternalStore } from "react";
 import { cn } from "@/components/ui/cn";
 import { useRole } from "@/lib/role";
 
@@ -15,6 +15,8 @@ const nav = [
 ];
 
 const adminItem = { href: "/admin", label: "Admin", d: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-4" };
+/** Dashboard logins (role "viewer") get this screen only. */
+const dashboardNav = [{ href: "/dashboard", label: "Dashboard", d: "M4 20V10M10 20V4M16 20v-7M22 20H2" }];
 
 function Icon({ d, active }: { d: string; active?: boolean }) {
   return (
@@ -51,8 +53,13 @@ export function AppShell({
   accountSlot?: React.ReactNode;
 }) {
   const path = usePathname();
+  const router = useRouter();
   const { role } = useRole();
-  const items = role === "admin" ? [...nav, adminItem] : nav;
+  const viewer = role === "viewer";
+  const items = viewer ? dashboardNav : role === "admin" ? [...nav, adminItem] : nav;
+  // A dashboard login only ever sees the dashboard (the database also refuses any change it tries to make).
+  const offLimits = viewer && !path.startsWith("/dashboard");
+  useEffect(() => { if (offLimits) router.replace("/dashboard"); }, [offLimits, router]);
   const online = useOnline();
   const isActive = (h: string) => (h === "/" ? path === "/" : path.startsWith(h));
 
@@ -95,7 +102,7 @@ export function AppShell({
         <div className="mt-auto space-y-3">
           <div className="flex flex-wrap gap-2">
             {status}
-            {syncSlot}
+            {!viewer && syncSlot}
           </div>
           {accountSlot}
         </div>
@@ -108,12 +115,12 @@ export function AppShell({
             <Image src="/logo.png" alt="Freedom Trust" width={385} height={182} className="h-9 sm:h-10 w-auto shrink-0" priority />
           </Link>
           <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
-            {syncSlot}
+            {!viewer && syncSlot}
             {status}
           </div>
         </header>
 
-        <main className="flex-1 w-full min-w-0 px-4 py-5 pb-28 sm:px-6 lg:px-10 lg:py-8 lg:pb-10 animate-fade-up">{children}</main>
+        <main className="flex-1 w-full min-w-0 px-4 py-5 pb-28 sm:px-6 lg:px-10 lg:py-8 lg:pb-10 animate-fade-up">{offLimits ? null : children}</main>
 
         {/* Mobile bottom nav */}
         <nav aria-label="Main" className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-line pb-safe">

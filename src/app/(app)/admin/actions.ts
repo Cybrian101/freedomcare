@@ -39,6 +39,7 @@ export async function createStaff(_prev: StaffResult | null, formData: FormData)
   const fullName = String(formData.get("full_name") ?? "").trim().replace(/\s+/g, " ");
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  const role = formData.get("role") === "viewer" ? "viewer" : "staff"; // admins are made in the SQL editor, never here
   if (fullName.length < 2 || fullName.length > 60) return { ok: false, message: "Enter the staff member's name (2 to 60 letters)." };
   if (!EMAIL_RE.test(email)) return { ok: false, message: "Enter a valid email address." };
   if (password.length < 8) return { ok: false, message: "The password needs at least 8 characters." };
@@ -52,12 +53,12 @@ export async function createStaff(_prev: StaffResult | null, formData: FormData)
 
   const { error: profileErr } = await svc
     .from("staff_profiles")
-    .upsert({ user_id: data.user.id, role: "staff", full_name: fullName }, { onConflict: "user_id" });
+    .upsert({ user_id: data.user.id, role, full_name: fullName }, { onConflict: "user_id" });
   if (profileErr) {
     await svc.auth.admin.deleteUser(data.user.id); // do not leave a login without a name/role behind
     return { ok: false, message: "Could not save the staff profile. Run supabase/sql/3_staff_attendance_activity.sql in Supabase, then try again." };
   }
-  return { ok: true, message: `${fullName} can now sign in with ${email}.` };
+  return { ok: true, message: `${fullName} can now sign in with ${email}${role === "viewer" ? " (dashboard only)" : ""}.` };
 }
 
 export async function setStaffActive(userId: string, active: boolean): Promise<StaffResult> {
