@@ -19,8 +19,8 @@ export interface DocumentScannerProps {
 type Phase = "idle" | "preparing" | "ready" | "reading" | "error";
 
 const COPY: Record<OcrKind, { title: string; tip: string }> = {
-  aadhaar: { title: "Aadhaar card", tip: "Lay the card flat and let it FILL the photo, with the QR code (the square on the card) and the 12-digit number sharp and large. Avoid glare and shadows. The photo only pre-fills the form; you confirm every field." },
-  udid: { title: "UDID / disability document", tip: "Photograph the UDID card or enrolment acknowledgement. The photo only pre-fills the form; you confirm every field." },
+  aadhaar: { title: "Aadhaar card", tip: "Card flat, filling the photo, QR code sharp. No glare. The photo is not saved." },
+  udid: { title: "UDID / disability document", tip: "Photograph the UDID card or enrolment slip. The photo is not saved." },
 };
 
 export function DocumentScanner({ kind, onResult, onManual, title }: DocumentScannerProps) {

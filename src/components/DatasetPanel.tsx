@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { Button, Card } from "@/components/ui";
 import { createClient } from "@/lib/supabase/client";
+import { useIsAdmin } from "@/lib/role";
 import { datasetMeta, downloadDataset, isReady, type DatasetMeta, syncThumbs } from "@/lib/local-db";
 
 // One shared snapshot so every panel/page sees the same state after a download.
@@ -38,6 +39,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString("en-IN", { dateStyle: 
 
 export function DatasetPanel({ compact = false }: { compact?: boolean }) {
   const { meta, loaded, busy, error, ready, refresh } = useDataset();
+  const admin = useIsAdmin();
 
   // First visit on an online device with no list at all: fetch it without making staff hunt for the button.
   useEffect(() => {
@@ -58,6 +60,8 @@ export function DatasetPanel({ compact = false }: { compact?: boolean }) {
         : "No beneficiary list on this device yet";
 
   if (compact) {
+    // Staff only need to hear about the list when something is wrong with it.
+    if (ready && !admin) return null;
     // Slim one-line bar so the search box stays near the top of a small screen.
     const short = !loaded ? "Checking this phone..." : ready ? `${meta!.count} people on this phone, ready for offline` : partial ? `Incomplete list (${meta!.count} of ${meta!.serverCount ?? "?"})` : "No list on this phone yet";
     return (

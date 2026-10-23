@@ -151,7 +151,7 @@ export default function RegistrationPage() {
 
   return (
     <div className="mx-auto w-full max-w-xl space-y-4">
-      <PageHeader title="Registration" subtitle="Scan the Aadhaar to find the existing record, or register someone new" />
+      <PageHeader title="Registration" subtitle="Scan the Aadhaar. Find the person or add them." />
       <DatasetPanel compact />
 
       {step.s === "capture" && (

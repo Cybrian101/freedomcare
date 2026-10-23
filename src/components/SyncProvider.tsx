@@ -179,9 +179,9 @@ export function PendingBanner() {
       role="status"
       className={`mx-auto mb-3 block w-full max-w-xl rounded-2xl px-4 py-3 text-sm font-bold ${bad ? "bg-bad-bg text-bad-fg" : "bg-warn-bg text-warn-fg"}`}
     >
-      {pending} item{pending === 1 ? "" : "s"} not yet confirmed by the server
-      {foreign > 0 ? ` - ${foreign} captured under another login` : failed > 0 ? ` - ${failed} need attention` : online ? " - sending..." : " - waiting for signal"}.
-      Keep this app open and do not clear browser data. Tap to review.
+      {pending} not sent yet
+      {foreign > 0 ? `: ${foreign} from another login` : failed > 0 ? `: ${failed} need attention` : online ? ": sending..." : ": waiting for signal"}.
+      Do not clear this app. Tap to see.
     </Link>
   );
 }

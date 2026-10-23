@@ -7,6 +7,7 @@ import { withTimeout } from "@/lib/net";
 import { asRosterStatus, deleteDraft, getLocal, loadDraft, putLocalFromServer, saveDraft, syncThumbs, type LocalBeneficiary } from "@/lib/local-db";
 import { kindOf, pendingHandover, submitHandover } from "@/lib/offline-queue";
 import { useSync } from "@/components/SyncProvider";
+import { useIsAdmin } from "@/lib/role";
 import { CaptureSheet } from "@/components/camera/CaptureSheet";
 import { Avatar, usePersonThumb } from "./Avatar";
 import { ProfilePhotoAction } from "./ProfilePhotoAction";
@@ -30,6 +31,7 @@ export function BeneficiaryProfile({ id }: { id: string }) {
   const [photoKey, setPhotoKey] = useState(0);
   const [zoom, setZoom] = useState(false);
   const { items, retryItem, online } = useSync();
+  const admin = useIsAdmin();
   const thumbUrl = usePersonThumb(id, photoKey);
 
   const mine = useMemo(() => items.filter((i) => i.rosterId === id).sort((a, b) => b.createdAt - a.createdAt), [items, id]);
@@ -131,8 +133,8 @@ export function BeneficiaryProfile({ id }: { id: string }) {
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <Badge tone={STATUS_TONE[status]} dot>{STATUS_LABEL[status]}</Badge>
               <span className="text-sm text-ink-muted">
-                S.No {row.serial_no ?? "-"}
-                {row.attended_at ? ` · attended ${new Date(row.attended_at).toLocaleTimeString("en-IN", { timeStyle: "short" })}` : ""}
+                {admin ? `S.No ${row.serial_no ?? "-"}` : ""}
+                {row.attended_at ? `${admin ? " · " : ""}attended ${new Date(row.attended_at).toLocaleTimeString("en-IN", { timeStyle: "short" })}` : ""}
               </span>
             </div>
           </div>
@@ -152,7 +154,7 @@ export function BeneficiaryProfile({ id }: { id: string }) {
 
         {/* what to do */}
         <div className="space-y-4">
-          {row.review_note && (
+          {admin && row.review_note && (
             <div role="alert" className="rounded-2xl border-2 border-warn-fg/40 bg-warn-bg p-4 text-warn-fg">
               <p className="font-extrabold">Please verify</p>
               <p className="text-sm">{row.review_note}</p>
@@ -194,6 +196,7 @@ export function BeneficiaryProfile({ id }: { id: string }) {
                 <p className="text-sm text-ink-muted">Photograph the person receiving the aid. This completes the distribution.</p>
               </div>
               <SyncBanner
+                detail={admin}
                 distributedAt={row.distributed_at}
                 open={openHandover}
                 dup={lastHandover?.resolution === "duplicate"}
@@ -247,8 +250,10 @@ export function BeneficiaryProfile({ id }: { id: string }) {
 }
 
 function SyncBanner({
-  distributedAt, open, dup, onRetry,
+  detail, distributedAt, open, dup, onRetry,
 }: {
+  /** admins see the server's own words; staff a plain sentence */
+  detail: boolean;
   distributedAt: string | null;
   open?: { status: string; lastError: string | null; attempts: number };
   dup: boolean;
@@ -259,7 +264,7 @@ function SyncBanner({
       return (
         <div role="alert" className="space-y-1 rounded-2xl bg-bad-bg p-4 text-bad-fg">
           <p className="font-extrabold">Could not save the handover</p>
-          <p className="text-sm">{open.lastError}</p>
+          <p className="text-sm">{detail ? open.lastError : "The server refused it. Ask an admin to check the Sync page."}</p>
           <a href="/queue" className="text-sm font-bold underline">Open the sync log</a>
         </div>
       );
@@ -267,7 +272,7 @@ function SyncBanner({
       <div className="space-y-2 rounded-2xl bg-info-bg p-4 text-info-fg">
         <p className="font-extrabold">Saved on this phone - waiting to upload</p>
         <p className="text-sm">
-          The photo is safe here and uploads by itself{open.lastError ? ` (${open.lastError})` : ""}. It is NOT counted as distributed until the server confirms.
+          The photo is safe here and uploads by itself{detail && open.lastError ? ` (${open.lastError})` : ""}.
         </p>
         <Button variant="secondary" onClick={onRetry}>Retry now</Button>
       </div>

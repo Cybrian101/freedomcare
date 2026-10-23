@@ -23,7 +23,7 @@ function badge(meta: OcrField | undefined, value: string, review: boolean) {
   if (meta.value === null && !value) return <Badge tone="neutral">Not read</Badge>;
   if (review) return <Badge tone="warn" dot>Check this</Badge>;
   if (meta.confidence >= 0.9) return <Badge tone="ok" dot>Clear</Badge>;
-  return <Badge tone="info" dot>{Math.round(meta.confidence * 100)}%</Badge>;
+  return null; // a percentage means nothing to someone in a hurry: only "Check this" / "Not read" / "Clear" are shown
 }
 
 /** Editable field with OCR confidence badge; highlights fields that need review. */

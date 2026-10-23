@@ -7,6 +7,7 @@ import { OfflineReadiness } from "@/components/OfflineReadiness";
 import { groupMembers, kindOf, type QueueItem, type QueueKind } from "@/lib/queue-core";
 import { signOut } from "@/app/(auth)/login/actions";
 import { SignOutForm } from "@/components/SignOutForm";
+import { useIsAdmin } from "@/lib/role";
 
 /** What each kind of saved action is, in plain words. */
 const KIND: Record<QueueKind, { badge: string; tone: string; line: (i: QueueItem) => string; plural: string }> = {
@@ -87,6 +88,9 @@ export default function QueuePage() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [done, setDone] = useState<DoneRow[] | null>(null);
+  // Staff see what is waiting and one button to send it; admins also get the full log (who, attempts, server errors,
+  // readiness, confirmed history) and may delete an item.
+  const admin = useIsAdmin();
 
   // The log belongs to the signed-in staff member. Work saved on this phone under another login is kept apart.
   const isMine = (i: QueueItem) => !i.ownerId || !me || i.ownerId === me || i.adopted === true;
@@ -109,7 +113,7 @@ export default function QueuePage() {
     return () => { dead = true; };
   }, [online, me, syncedCount]);
 
-  const waiting = (["handover", "profile", "attendance", "registration", "link"] as QueueKind[])
+  const waiting = (["handover", "group_handover", "profile", "attendance", "registration", "link"] as QueueKind[])
     .map((k) => ({ k, n: unsynced.filter((i) => kindOf(i) === k).length }))
     .filter((x) => x.n > 0)
     .map((x) => `${x.n} ${KIND[x.k].plural}`)
@@ -127,7 +131,7 @@ export default function QueuePage() {
           disabled={pending === 0}
           className="rounded-lg bg-sky-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-40"
         >
-          Retry now
+          Send now
         </button>
       </div>
 
@@ -135,7 +139,7 @@ export default function QueuePage() {
         {online ? "Online." : "No internet - everything is safe on this phone and uploads when signal returns."}
         {waiting ? ` Still waiting: ${waiting}.` : " Nothing waiting."}
       </p>
-      <OfflineReadiness compact />
+      {admin && <OfflineReadiness compact />}
       {storage?.persisted === false && (
         <p className="rounded-lg bg-amber-50 p-2 text-sm text-amber-900">
           Browser may clear stored photos if space runs low. Keep this device online soon, or install the app to the home screen.
@@ -145,10 +149,10 @@ export default function QueuePage() {
         <p className="rounded-lg bg-red-50 p-2 text-sm text-red-900">Device storage is low - free some space before capturing more photos.</p>
       )}
       {note && <p className="rounded-lg bg-slate-100 p-2 text-sm">{note}</p>}
-      <p className="text-xs text-slate-500">
+      {admin && <p className="text-xs text-slate-500">
         Last confirmed by server: {lastOk ? new Date(lastOk).toLocaleTimeString("en-IN") : "nothing yet on this device"}
         {oldest ? ` - oldest waiting item saved ${new Date(oldest).toLocaleTimeString("en-IN")}` : ""}
-      </p>
+      </p>}
 
       {unsynced.length === 0 && <p className="py-4 text-center text-slate-500">Nothing waiting. Everything you saved has been confirmed by the server.</p>}
       {unsynced.length > 0 && <h2 className="pt-1 text-sm font-semibold uppercase tracking-wide text-amber-800">Still waiting ({unsynced.length})</h2>}
@@ -164,9 +168,9 @@ export default function QueuePage() {
                   <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${k.tone}`}>{k.badge}</span>
                   <p className="font-bold text-slate-900">{k.line(i)}</p>
                   <Person i={i} />
-                  <p className="text-xs text-slate-500">by {who(i)} · captured {clock(i.createdAt)} · {i.attempts} attempt{i.attempts === 1 ? "" : "s"}</p>
+                  {admin && <p className="text-xs text-slate-500">by {who(i)} · captured {clock(i.createdAt)} · {i.attempts} attempt{i.attempts === 1 ? "" : "s"}</p>}
                   <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${TONE[i.status]}`}>{reason(i, online)}</span>
-                  {i.lastError && <p className="break-words text-xs text-red-700">{i.lastError}</p>}
+                  {i.lastError && (admin || i.status === "rejected") && <p className="break-words text-xs text-red-700">{i.lastError}</p>}
                   {i.ownerId && me && i.ownerId !== me && !i.adopted && (
                     <div className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-950">
                       Held: captured under a different login. Sign in as {i.ownerEmail ?? "that user"} to send it under their name, or send it under yours.
@@ -183,7 +187,7 @@ export default function QueuePage() {
                 >
                   Retry
                 </button>
-                {confirmId === i.id ? (
+                {!admin ? null : confirmId === i.id ? (
                   <button
                     onClick={async () => {
                       const ok = await removeItem(i.id);
@@ -230,6 +234,7 @@ export default function QueuePage() {
         </div>
       )}
 
+      {admin && <>
       <h2 className="pt-2 text-sm font-semibold uppercase tracking-wide text-emerald-800">
         Done - confirmed by the server{done ? ` (${done.length})` : ""}
       </h2>
@@ -275,6 +280,7 @@ export default function QueuePage() {
           </ul>
         </>
       )}
+      </>}
       <div className="border-t border-slate-200 pt-3">
         <SignOutForm action={signOut} />
       </div>

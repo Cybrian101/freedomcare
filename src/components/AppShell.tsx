@@ -124,7 +124,7 @@ export function AppShell({
                   href={n.href}
                   aria-current={isActive(n.href) ? "page" : undefined}
                   className={cn(
-                    "flex flex-col items-center justify-center gap-0.5 min-h-16 min-w-0 px-0.5 text-[11px] leading-tight sm:text-xs font-bold transition-colors",
+                    "flex flex-col items-center justify-center gap-0.5 min-h-16 min-w-0 px-0.5 text-xs leading-tight min-[360px]:text-[13px] font-bold transition-colors",
                     isActive(n.href) ? "text-teal-700" : "text-ink-muted",
                   )}
                 >
