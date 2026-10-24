@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, PageHeader, SectionTitle, SegmentedControl, Sheet } from "@/components/ui";
 import { Photo, useSignedUrl } from "@/components/PhotoLink";
+import { SignOutForm } from "@/components/SignOutForm";
+import { signOut } from "@/app/(auth)/login/actions";
 import { createClient } from "@/lib/supabase/client";
 import type { Appliance } from "@/lib/types";
 
@@ -307,6 +309,11 @@ export function DashboardView() {
           </div>
         )}
       </Sheet>
+
+      {/* a dashboard login has no Sync screen, so sign-out lives here (phones have no sidebar) */}
+      <div className="border-t border-line pt-4">
+        <SignOutForm action={signOut} />
+      </div>
     </div>
   );
 }
