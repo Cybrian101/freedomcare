@@ -14,6 +14,7 @@ const BUILD = "__BUILD_ID__";
 const ASSETS = __ASSETS__;
 const PAGES = __PAGES__;
 
+const MANIFEST = "/precache-manifest.json";
 const STATIC_CACHE = "fc2-static";
 const PAGE_CACHE = "fc2-pages";
 
@@ -35,7 +36,10 @@ self.addEventListener("install", (event) => {
     (async () => {
       const cache = await caches.open(STATIC_CACHE);
       const have = new Set((await cache.keys()).map((r) => new URL(r.url).pathname));
-      const todo = ASSETS.filter((a) => !have.has(a));
+      // The file list (precache-manifest.json) has the same name in every build, so it is never skipped as "already
+      // stored": it is fetched fresh, and only after every other file succeeded (see below). A phone that kept an older
+      // build's list would otherwise check for files that no longer exist and show "still being stored" for ever.
+      const todo = ASSETS.filter((a) => a !== MANIFEST && !have.has(a));
       // A few at a time so a slow connection is not flooded; one retry each. Any file that still fails aborts the install,
       // so the previous worker (and its files) keeps running and the install is attempted again on the next visit.
       for (let i = 0; i < todo.length; i += 6) {
@@ -45,6 +49,7 @@ self.addEventListener("install", (event) => {
           }),
         );
       }
+      try { await putStatic(cache, MANIFEST); } catch { await putStatic(cache, MANIFEST); }
       await self.skipWaiting();
     })(),
   );

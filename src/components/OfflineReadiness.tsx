@@ -45,7 +45,7 @@ export function OfflineReadiness({ compact = false }: { compact?: boolean }) {
     {
       ok: !!r?.files,
       label: "App files stored",
-      hint: unsupported ? "Not supported here (needs the https site)" : r?.files ? "All the app's code is on this phone" : r?.worker ? "Still being stored..." : "Not installed yet. Open the app once with signal.",
+      hint: unsupported ? "Not supported here (needs the https site)" : r?.files ? "All the app's code is on this phone" : r?.worker ? `Still being stored${r.filesTotal ? ` (${r.filesStored} of ${r.filesTotal})` : ""}...` : "Not installed yet. Open the app once with signal.",
     },
     {
       ok: !!r?.screens,

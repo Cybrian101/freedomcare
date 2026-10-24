@@ -12,6 +12,9 @@ export interface Readiness {
   worker: boolean;
   /** every build file (code, styles, fonts, icons) is stored */
   files: boolean;
+  /** how many of this build's files are stored, of how many (shown while it is still storing) */
+  filesStored?: number;
+  filesTotal?: number;
   /** every screen in SHELL is stored */
   screens: boolean;
   /** the on-device reader (worker + engine + English data) is stored */
@@ -34,7 +37,9 @@ export async function checkReadiness(): Promise<Readiness> {
       const mres = await c.match("/precache-manifest.json");
       if (mres) {
         const m = (await mres.json()) as { assets: string[] };
-        out.files = m.assets.length > 0 && m.assets.every((a) => stored.has(a));
+        out.filesTotal = m.assets.length;
+        out.filesStored = m.assets.filter((a) => stored.has(a)).length;
+        out.files = m.assets.length > 0 && out.filesStored === m.assets.length;
       }
       out.scanner =
         stored.has("/tesseract/worker.min.js") &&
